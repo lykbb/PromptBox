@@ -1,0 +1,1185 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>PromptBox 原型</title>
+<style>
+:root{--page:#f1f1ee;--frame:#fff;--line:#dad9d4;--line-soft:#ebeae6;--fill:#f6f6f3;--fill-2:#ecebe7;--ink:#1d1d1b;--ink-2:#5b5b56;--ink-3:#8f8e88;--mark:#e8590c;--add:#e6f4e9;--add-ink:#1d6a33;--del:#fbeae9;--del-ink:#9f2620;--hl:#fff0b3;--mono:"SF Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--page);color:var(--ink);font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+button{font:inherit;color:inherit}
+p{margin:0}
+
+.bar{position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;align-items:center;gap:10px 20px;padding:12px 20px;background:var(--frame);border-bottom:1px solid var(--line)}
+.bar-title b{font-size:15px}
+.bar-title span{margin-left:10px;font-size:12px;color:var(--ink-3)}
+.tabs{display:flex;flex-wrap:wrap;gap:4px}
+.tabs button{border:0;background:none;padding:4px 10px;border-radius:6px;cursor:pointer;color:var(--ink-2)}
+.tabs button:hover{background:var(--fill-2)}
+.tabs button[aria-current="page"]{background:var(--ink);color:#fff}
+.tabs .p1{color:var(--ink-3)}
+.toggle{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2);cursor:pointer}
+
+.screen{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;padding:20px;align-items:start}
+@media (max-width:1180px){.screen{grid-template-columns:minmax(0,1fr)}}
+.canvas{overflow-x:auto;padding-bottom:4px}
+.canvas [data-go],.canvas [data-pick]{cursor:pointer}
+.canvas [data-go]:hover,.canvas [data-pick]:hover{outline:2px dashed var(--mark);outline-offset:-2px}
+.notes{position:sticky;top:76px;background:var(--frame);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.notes h2{margin:0 0 4px;font-size:16px}
+.notes .lead{margin-bottom:14px;font-size:13px;color:var(--ink-2)}
+.notes ol{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.notes li{display:grid;grid-template-columns:22px minmax(0,1fr);gap:6px;font-size:13px;line-height:1.6}
+.notes li .mk{margin-top:2px}
+.notes .foot{margin-top:14px;padding-top:10px;border-top:1px solid var(--line-soft);font-size:12px;color:var(--ink-3)}
+.notes .ctl{margin-top:12px}
+.mk{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;border-radius:50%;background:var(--mark);color:#fff;font-size:11px;font-weight:600;line-height:1;vertical-align:middle}
+body.no-marks .canvas .mk{display:none}
+
+.app{position:relative;display:grid;grid-template-columns:188px 300px minmax(0,1fr);height:700px;min-width:900px;background:var(--frame);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.side{display:flex;flex-direction:column;gap:2px;min-height:0;padding:14px 10px;background:var(--fill);border-right:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:6px;padding:0 8px 12px}
+.logo{font-size:15px;font-weight:700}
+.gh{margin-left:auto;padding:0 6px;border:1px solid var(--line);border-radius:5px;font-size:11px;color:var(--ink-2)}
+.nav-label{display:flex;align-items:center;gap:6px;padding:12px 8px 4px;font-size:12px;color:var(--ink-3)}
+.nav-item{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;color:var(--ink-2)}
+.nav-item em{margin-left:auto;font-size:12px;font-style:normal;color:var(--ink-3)}
+.nav-item .new{margin-left:auto;padding:0 7px;border-radius:9px;background:var(--ink);font-size:11px;font-style:normal;color:#fff}
+.nav-item.on{background:var(--fill-2);color:var(--ink);font-weight:600}
+.nav-item.big{font-size:15px}
+.nav-empty{padding:4px 8px;font-size:12px;color:var(--ink-3)}
+.side-foot{display:flex;align-items:center;gap:2px;margin-top:auto;padding-top:10px;border-top:1px solid var(--line)}
+.side-foot button{position:relative;border:0;background:none;padding:4px 8px;border-radius:6px;font-size:13px;color:var(--ink-2)}
+.dot{position:absolute;top:4px;right:1px;width:6px;height:6px;border-radius:50%;background:var(--ink)}
+
+.list{display:flex;flex-direction:column;min-width:0;min-height:0;border-right:1px solid var(--line)}
+.list-head{display:flex;align-items:center;gap:6px;padding:12px;border-bottom:1px solid var(--line-soft)}
+.search{flex:1;display:flex;align-items:center;min-width:0;height:32px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:13px;color:var(--ink-3);white-space:nowrap;overflow:hidden}
+.search.typed{border-color:var(--ink-3);color:var(--ink)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:13px;white-space:nowrap}
+.btn.primary{background:var(--ink);border-color:var(--ink);color:#fff}
+.btn.sm{height:24px;padding:0 8px;font-size:12px}
+.btn.ghost{border-color:transparent;background:none}
+.btn.icon{width:30px;padding:0}
+.banner{margin:10px 12px 0;padding:10px 12px;border:1px dashed var(--ink-3);border-radius:8px;background:var(--fill);font-size:12px;color:var(--ink-2)}
+.banner .row{display:flex;align-items:center;gap:6px;margin-top:8px}
+.list-meta{display:flex;align-items:center;gap:6px;padding:10px 14px 6px;font-size:12px;color:var(--ink-3)}
+.items{flex:1;min-height:0;overflow:auto;padding:0 8px 8px}
+.item{padding:10px;margin-bottom:2px;border-radius:8px}
+.item.on{background:var(--fill-2)}
+.item-title{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600}
+.badge{padding:0 6px;border:1px solid var(--line);border-radius:4px;font-size:11px;font-weight:500;color:var(--ink-2)}
+.item-snip{margin-top:2px;font-size:12px;color:var(--ink-3);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.item-foot{display:flex;align-items:center;gap:4px;margin-top:6px;font-size:11px;color:var(--ink-3)}
+.item-foot .time{margin-left:auto}
+.tag{display:inline-flex;align-items:center;padding:0 6px;border-radius:4px;background:var(--fill-2);font-size:11px;color:var(--ink-2)}
+.tag.add{border:1px dashed var(--line);background:none;color:var(--ink-3)}
+.lab{flex:none;padding:0 6px;border-radius:4px;font-size:11px;font-weight:500}
+.lab.task{border:1px solid var(--ink-3);color:var(--ink-2)}
+.lab.rule{background:var(--fill-2);color:var(--ink-2)}
+.similar{display:inline-block;margin-top:6px;padding:1px 6px;border-radius:5px;background:var(--fill);font-size:11px;color:var(--ink-2)}
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:24px;text-align:center;font-size:13px;color:var(--ink-3)}
+.empty b{font-size:15px;color:var(--ink)}
+
+.disc-head{display:grid;gap:8px;padding:12px;border-bottom:1px solid var(--line-soft)}
+.disc-title b{display:block;font-size:15px}
+.disc-title span{font-size:12px;color:var(--ink-3)}
+.src-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.src{padding:0 8px;border:1px dashed var(--line);border-radius:10px;font-size:11px;color:var(--ink-3)}
+.src.on{border-style:solid;background:#fff;color:var(--ink-2)}
+.scan-row{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-3)}
+.scan-row .btn{margin-left:auto}
+.chips-row{display:flex;align-items:center;gap:6px;padding:10px 12px 6px}
+.ic{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.item-title .ic,.nav-item .ic{color:var(--ink-3)}
+.tool{display:inline-flex;align-items:center;justify-content:center;flex:none;width:22px;height:22px;border-radius:50%;background:var(--ink);font-size:10px;font-weight:600;color:#fff}
+.tool.off{background:none;border:1px dashed var(--ink-3);color:var(--ink-3)}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;padding:0;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink-2)}
+.disc-top{display:flex;align-items:center;gap:6px}
+.disc-top b{margin-right:auto;font-size:15px}
+.disc-sub{font-size:12px;color:var(--ink-3)}
+.src-icons{display:flex;align-items:center;gap:4px}
+.src-icons .meta{margin:0 auto 0 6px;font-size:11px;color:var(--ink-3);white-space:nowrap}
+.gen-row{display:flex;align-items:center;gap:8px;margin:10px 12px 0;padding:10px 12px;border:1px solid var(--ink);border-radius:8px;background:var(--fill)}
+.gen-row b{font-size:13px}
+.gen-row small{display:block;font-size:11px;color:var(--ink-3)}
+.gen-row .go{margin-left:auto;font-size:16px}
+
+.detail{display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0;padding:16px 20px;overflow:auto}
+.detail-head{display:flex;align-items:center;gap:8px}
+.title{flex:1;min-width:0;font-size:20px;font-weight:700}
+.actions{display:flex;align-items:center;gap:6px}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+.seg{display:inline-flex;overflow:hidden;border:1px solid var(--line);border-radius:7px;font-size:12px}
+.seg span{padding:3px 10px;color:var(--ink-2)}
+.seg span+span{border-left:1px solid var(--line)}
+.seg .on{background:var(--ink);color:#fff}
+.tags{display:flex;flex-wrap:wrap;gap:4px}
+.fields{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px 10px;align-items:start;font-size:13px}
+.fields label{padding-top:5px;color:var(--ink-3)}
+.input{min-height:30px;padding:5px 10px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:13px}
+.input.area{min-height:72px}
+.hint{display:block;font-size:11px;color:var(--ink-3)}
+.muted{color:var(--ink-3)}
+.editor{flex:1;min-height:0;overflow:auto;padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.editor.short{flex:none;min-height:0}
+pre{margin:0;font:13px/1.75 var(--mono);white-space:pre-wrap;word-break:break-word}
+.var{padding:0 2px;border-radius:4px;background:var(--fill-2)}
+u.fix{text-decoration:none;border-bottom:2px solid var(--ink-3)}
+.editor-foot{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;color:var(--ink-3)}
+.editor-foot .saved{margin-left:auto}
+.hint-line{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-3)}
+code{padding:1px 5px;border-radius:4px;background:var(--fill-2);font:12px var(--mono);color:var(--ink-2)}
+.placeholder{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;font-size:13px;color:var(--ink-3)}
+.quotes{display:grid;gap:6px}
+.q{padding:8px 10px;border:1px solid var(--line-soft);border-radius:8px;font-size:12px;color:var(--ink-2)}
+.q .from{display:block;font-size:11px;color:var(--ink-3)}
+.q .after{display:block;margin-top:2px;color:var(--ink-3)}
+.more{font-size:12px;color:var(--ink-2);text-decoration:underline}
+
+.scrim{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(29,29,27,.38)}
+.dialog{display:flex;flex-direction:column;width:100%;max-width:640px;max-height:100%;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.18)}
+.dialog.mid{max-width:760px}
+.dialog.wide{max-width:860px}
+.dialog.narrow{max-width:540px}
+.dlg-head{display:flex;align-items:center;gap:10px;padding:12px 14px 12px 18px;border-bottom:1px solid var(--line-soft)}
+.dlg-head b{font-size:15px}
+.dlg-head .sub{font-size:12px;color:var(--ink-3)}
+.x{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin-left:auto;border:0;border-radius:6px;background:none;font-size:18px;color:var(--ink-2)}
+.dlg-body{min-height:0;overflow:auto;padding:16px 18px}
+.dlg-foot{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--line-soft)}
+.dlg-foot .hint{margin-right:auto;font-size:12px}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:16px}
+.cols.ver{grid-template-columns:200px minmax(0,1fr)}
+.cols.exp{grid-template-columns:minmax(0,1fr) minmax(0,1.1fr)}
+.cols.gen{grid-template-columns:minmax(0,.85fr) minmax(0,1.3fr)}
+.sec-label{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;color:var(--ink-3)}
+.var-field{margin-bottom:12px}
+.var-field label{display:block;margin-bottom:4px;font-size:13px;font-weight:600}
+.box{padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--fill)}
+mark{padding:0 2px;border-radius:3px;background:var(--hl);color:inherit}
+.note-line{padding:6px 10px;border-radius:6px;background:var(--fill);font-size:12px;color:var(--ink-2)}
+.stack{display:grid;gap:10px}
+
+.src-card{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px}
+.src-card.off{border-style:dashed}
+.src-main{flex:1;min-width:0}
+.src-main b{font-size:14px}
+.state{flex:none;padding:0 8px;border-radius:10px;font-size:12px}
+.state.ok{background:var(--fill-2);color:var(--ink)}
+.state.no{border:1px dashed var(--line);color:var(--ink-3)}
+.ask{display:flex;align-items:center;min-height:38px;margin-bottom:14px;padding:6px 12px;border:1px solid var(--ink-3);border-radius:8px;font-size:14px}
+.ref{display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px;margin-bottom:6px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px}
+.ref small{display:block;font-size:11px;color:var(--ink-3)}
+.cb{width:14px;height:14px;margin-top:3px;border:1.5px solid var(--ink-3);border-radius:3px}
+.cb.on{background:var(--ink);border-color:var(--ink)}
+
+.vers{display:flex;flex-direction:column;gap:4px}
+.ver{padding:8px 10px;border:1px solid transparent;border-radius:8px}
+.ver.on{border-color:var(--ink);background:var(--fill)}
+.ver b{font-size:13px}
+.ver small{display:block;font-size:11px;color:var(--ink-3)}
+.plus{color:var(--add-ink)}
+.minus{color:var(--del-ink)}
+.compare{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:10px;font-size:13px}
+.select{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:12px}
+.compare .stat{margin-left:auto;font-size:12px}
+.diff{overflow:hidden;padding:6px 0;border:1px solid var(--line);border-radius:8px;font:12.5px/1.8 var(--mono)}
+.diff div{display:grid;grid-template-columns:24px minmax(0,1fr);padding-right:10px;white-space:pre-wrap;word-break:break-word}
+.diff span:first-child{text-align:center;color:var(--ink-3)}
+.diff .a{background:var(--add);color:var(--add-ink)}
+.diff .d{background:var(--del);color:var(--del-ink)}
+
+.opts{display:grid;gap:6px;margin-bottom:14px}
+.opt{display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px}
+.opt.on{border-color:var(--ink);background:var(--fill)}
+.radio{width:14px;height:14px;margin-top:3px;border:1.5px solid var(--ink-3);border-radius:50%}
+.opt.on .radio{border:4px solid var(--ink)}
+.opt small{display:block;font-size:11px;color:var(--ink-3)}
+.fm{color:var(--ink-3)}
+
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{padding:6px 8px;border-bottom:1px solid var(--line);font-size:12px;font-weight:500;text-align:left;color:var(--ink-3)}
+.tbl td{padding:9px 8px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+.tbl code{white-space:nowrap}
+
+.drop{position:absolute;inset:12px;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:2px dashed var(--ink-2);border-radius:12px;background:rgba(255,255,255,.9);font-size:13px;color:var(--ink-2)}
+.drop b{font-size:17px;color:var(--ink)}
+
+.phones{display:flex;flex-wrap:wrap;gap:24px}
+.phone-cap{margin-bottom:8px;font-size:12px;color:var(--ink-3)}
+.phone{position:relative;display:flex;flex-direction:column;width:280px;height:600px;overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:28px}
+.p-status{flex:none;height:26px}
+.p-bar{display:flex;align-items:center;gap:6px;padding:6px 12px;border-bottom:1px solid var(--line-soft)}
+.p-bar .grow{flex:1;text-align:center;font-weight:600}
+.p-btn{padding:2px 6px;border-radius:6px;font-size:13px;color:var(--ink-2)}
+.p-search{display:flex;align-items:center;gap:6px;margin:10px 12px 0}
+.p-search .search{height:30px}
+.phone .banner{margin:8px 12px 0;padding:8px 10px}
+.phone .items{padding:6px 8px}
+.p-scrim{position:absolute;inset:0;z-index:2;background:rgba(29,29,27,.38)}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:3;padding:10px 16px 20px;background:#fff;border-radius:18px 18px 0 0}
+.grab{width:36px;height:4px;margin:0 auto 10px;border-radius:2px;background:var(--line)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border:1px solid var(--line);border-radius:14px;font-size:12px;color:var(--ink-2)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.p-body{flex:1;display:flex;flex-direction:column;gap:10px;min-height:0;padding:12px}
+.p-body .title{flex:none;font-size:18px}
+.p-body .editor{padding:10px 12px}
+.p-body pre{font-size:12px}
+.p-foot{display:flex;align-items:center;gap:6px;padding:8px 12px 16px;border-top:1px solid var(--line-soft);font-size:12px;color:var(--ink-3)}
+.p-foot .saved{margin-left:auto}
+.p-menu{position:absolute;top:66px;right:12px;z-index:3;width:132px;padding:4px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.14);font-size:13px}
+.p-menu div{padding:6px 10px;border-radius:6px}
+.p-menu .danger{color:var(--del-ink)}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="bar-title"><b>PromptBox 原型 v0.2</b><span>低保真 · 鼠标移上去出现虚线框的地方可以点</span></div>
+  <nav class="tabs" aria-label="原型页面">
+    <button data-go="discover">发现</button>
+    <button data-go="sources">记录来源</button>
+    <button data-go="main">库</button>
+    <button data-go="search">搜索·说需求</button>
+    <button data-go="generate">按风格生成</button>
+    <button data-go="copy">复制·填变量</button>
+    <button data-go="export">导出</button>
+    <button data-go="import">导入文件</button>
+    <button data-go="settings">设置</button>
+    <button data-go="empty">空状态</button>
+    <button data-go="history" class="p1">版本历史 · P1</button>
+    <button data-go="mobile" class="p1">手机端 · P1</button>
+  </nav>
+  <label class="toggle"><input type="checkbox" id="marks" checked> 显示标注</label>
+</header>
+
+<!-- 发现 -->
+<section class="screen" id="s-discover">
+  <div class="canvas">
+    <div class="app" data-frame="discover">
+      <aside class="side">
+        <div class="brand"><span class="logo">PromptBox</span><span class="gh">GitHub</span></div>
+        <div class="nav-item big on">发现<i class="new">5</i><span class="mk">1</span></div>
+        <div class="nav-label">库</div>
+        <div class="nav-item" data-go="main">全部<em>8</em></div>
+        <div class="nav-label">类型</div>
+        <div class="nav-item"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>提示词<em>6</em></div>
+        <div class="nav-item"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4M7 2v4L4.5 8.5h7L9 6V2M8 8.5V14"/></svg>规则<em>2</em></div>
+        <div class="nav-label">标签</div>
+        <div class="nav-item"># 写作<em>4</em></div>
+        <div class="nav-item"># 工作<em>2</em></div>
+        <div class="nav-item"># 编程<em>2</em></div>
+        <div class="nav-item"># 产品<em>1</em></div>
+        <div class="side-foot">
+          <button data-go="import">导入</button>
+          <button data-go="settings">设置<i class="dot"></i></button>
+          <button>反馈</button>
+        </div>
+      </aside>
+
+      <section class="list">
+        <div class="disc-head">
+          <div class="disc-top"><b>发现</b><button class="icon-btn" title="扫描新对话" aria-label="扫描新对话"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5v3h-3"/></svg></button><span class="mk">3</span></div>
+          <div class="disc-sub">从你的对话里找出值得保存的提示词和规则</div>
+          <div class="src-icons"><span class="tool" title="Codex · 425 个对话">Cx</span><span class="tool" title="Claude Code · 5 个对话">Cl</span><span class="tool off" title="ChatGPT · 未添加">G</span><span class="meta" title="今天 09:12 扫描">已扫描 430 个对话</span><button class="icon-btn" data-go="sources" title="管理记录来源" aria-label="管理记录来源"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5h11M2.5 11h11"/><circle cx="6" cy="5" r="1.6" fill="#fff"/><circle cx="10.5" cy="11" r="1.6" fill="#fff"/></svg></button><span class="mk">2</span></div>
+        </div>
+        <div class="chips-row"><span class="chip on">全部 5</span><span class="chip"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>提示词 3</span><span class="chip"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4M7 2v4L4.5 8.5h7L9 6V2M8 8.5V14"/></svg>规则 2</span><span class="mk">4</span></div>
+        <div class="items">
+          <div class="item" data-pick="rule2">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4M7 2v4L4.5 8.5h7L9 6V2M8 8.5V14"/></svg>回答用中文</div>
+            <div class="item-foot"><span>12 次 · Codex、Claude Code</span><span class="time">今天</span></div>
+          </div>
+          <div class="item" data-pick="rule">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4M7 2v4L4.5 8.5h7L9 6V2M8 8.5V14"/></svg>先给结论，再给理由</div>
+            <div class="item-foot"><span>9 次 · Codex</span><span class="time">昨天</span></div>
+          </div>
+          <div class="item on" data-pick="tpl">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>小红书改写</div>
+            <div class="item-snip">把下面这段改成小红书风格，控制在 200 字，多用短句：{{内容}}</div>
+            <div class="item-foot"><span>6 次 · Codex、ChatGPT</span><span class="time">2 天前</span></div>
+          </div>
+          <div class="item">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>竞品分析框架</div>
+            <div class="item-snip">按目标用户、核心功能、定价、优缺点四列对比 {{竞品列表}}</div>
+            <div class="item-foot"><span>4 次 · ChatGPT</span><span class="time">5 天前</span></div>
+          </div>
+          <div class="item">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>周报整理</div>
+            <div class="item-snip">把这周的记录整理成周报：{{本周工作}}</div>
+            <div class="item-foot"><span>3 次 · ChatGPT</span><span class="time">1 周前</span></div>
+            <span class="similar">和库里的「周报生成」相似，保存时会合并</span><span class="mk">5</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="detail" data-variant="tpl">
+        <div class="detail-head">
+          <div class="title">小红书改写</div>
+          <div class="actions"><button class="btn">忽略</button><button class="btn primary" data-go="main">存为提示词</button><span class="mk">6</span></div>
+        </div>
+        <div class="meta">
+          <div class="seg"><span class="on">提示词</span><span>规则</span></div>
+          <div class="tags"><span class="tag">写作 ×</span><span class="tag add">+ 标签</span></div>
+        </div>
+        <div class="sec-label">模板 · 保存前可以直接改</div>
+        <div class="editor short"><pre>把下面这段改成小红书风格，<u class="fix">控制在 200 字</u>，多用短句：
+<span class="var">{{内容}}</span></pre></div>
+        <div class="hint-line"><span>下划线部分来自你的纠正：6 次里有 4 次你都补了这句</span><span class="mk">7</span></div>
+        <div class="hint-line"><span>AI 精修：起了名字，合并了 3 种说法 · 只发送了这 6 句原话</span><span class="mk">8</span></div>
+        <div class="sec-label">原话 · 6 条 <span class="mk">9</span></div>
+        <div class="quotes">
+          <div class="q"><span class="from">Codex · 10月14日</span>把下面这段改成小红书风格：周末去了一家咖啡店，环境很好……<span class="after">之后你说：太长了，控制在 200 字</span></div>
+          <div class="q"><span class="from">ChatGPT · 10月9日</span>帮我把这段写成小红书的风格：新买的跑鞋穿了一周……</div>
+          <div class="q"><span class="from">Codex · 10月2日</span>改成小红书风格，多用短句：这次去杭州玩了三天……</div>
+        </div>
+        <span class="more">查看全部 6 条</span>
+      </section>
+
+      <section class="detail" data-variant="rule" hidden>
+        <div class="detail-head">
+          <div class="title">先给结论，再给理由</div>
+          <div class="actions"><button class="btn">忽略</button><button class="btn primary">存为规则</button></div>
+        </div>
+        <div class="meta">
+          <div class="seg"><span>提示词</span><span class="on">规则</span></div>
+          <div class="tags"><span class="tag">写作 ×</span><span class="tag add">+ 标签</span></div>
+        </div>
+        <div class="sec-label">规则 · 保存前可以直接改</div>
+        <div class="editor short"><pre>回答时先给结论，再给理由。</pre></div>
+        <div class="hint-line">来自 9 次纠正，分布在 7 个对话里</div>
+        <div class="hint-line">其中 2 种说法是 AI 精修时合并进来的（字面不同、意思相同）</div>
+        <div class="hint-line">存进库后，可以和其他规则一起合成 AGENTS.md 或 CLAUDE.md</div>
+        <div class="sec-label">原话 · 9 条</div>
+        <div class="quotes">
+          <div class="q"><span class="from">Codex · 今天</span>先说结论</div>
+          <div class="q"><span class="from">Codex · 10月12日</span>结论放前面，理由放后面</div>
+          <div class="q"><span class="from">Codex · 10月8日</span>别铺垫，直接说结果</div>
+        </div>
+        <span class="more">查看全部 9 条</span>
+      </section>
+
+      <section class="detail" data-variant="rule2" hidden>
+        <div class="detail-head">
+          <div class="title">回答用中文</div>
+          <div class="actions"><button class="btn">忽略</button><button class="btn primary">存为规则</button></div>
+        </div>
+        <div class="meta">
+          <div class="seg"><span>提示词</span><span class="on">规则</span></div>
+          <div class="tags"><span class="tag add">+ 标签</span></div>
+        </div>
+        <div class="sec-label">规则 · 保存前可以直接改</div>
+        <div class="editor short"><pre>回答使用中文。</pre></div>
+        <div class="hint-line">来自 12 次纠正，跨 Codex 和 Claude Code 两个工具</div>
+        <div class="sec-label">原话 · 12 条</div>
+        <div class="quotes">
+          <div class="q"><span class="from">Claude Code · 今天</span>用中文回答</div>
+          <div class="q"><span class="from">Codex · 10月13日</span>说中文</div>
+        </div>
+        <span class="more">查看全部 12 条</span>
+      </section>
+    </div>
+  </div>
+  <aside class="notes">
+    <h2>发现</h2>
+    <p class="lead">PromptBox 的核心。不用你整理，它从你和各个 AI 的对话里找出你反复在说的话。新用户第一次打开就落在这里。</p>
+    <ol>
+      <li><span class="mk">1</span><span>侧栏第一项，数字是待处理的候选数。</span></li>
+      <li><span class="mk">2</span><span>记录来源只显示工具图标，鼠标移上去看名称和对话数；虚线圈是还没添加的。右边的按钮管理来源。真实产品用各工具自己的图标。</span></li>
+      <li><span class="mk">3</span><span>刷新按钮：只扫描上次之后新增的对话。全部在浏览器里计算，不上传。</span></li>
+      <li><span class="mk">4</span><span>候选分两类：提示词（重复的任务）和规则（重复的纠正），按出现次数排序。图标：气泡是提示词，图钉是规则，全站通用。</span></li>
+      <li><span class="mk">5</span><span>和库里已有内容相似时会标出来，保存时合并进已有条目，不会重复。</span></li>
+      <li><span class="mk">6</span><span>存之前可以改名、改类型、打标签。忽略过的不会再出现。点左边的两条规则看规则长什么样。</span></li>
+      <li><span class="mk">7</span><span>模板：每次都一样的部分保留，不一样的部分变成 {{变量}}；下划线部分来自你的纠正。</span></li>
+      <li><span class="mk">8</span><span>AI 精修是可选的，在设置里填了 Key 才会用，只发送这几句原话。没填 Key 时用规则起名。</span></li>
+      <li><span class="mk">9</span><span>原话是证据：能看到候选从哪几次对话里来，存进库后也保留。</span></li>
+    </ol>
+  </aside>
+</section>
+
+<!-- 记录来源 -->
+<section class="screen" id="s-sources" hidden>
+  <div class="canvas">
+    <div class="app" data-clone="discover">
+      <div class="scrim">
+        <div class="dialog">
+          <div class="dlg-head"><b>记录来源</b><span class="sub">PromptBox 从这些地方读取你说过的话</span><button class="x" data-go="discover" aria-label="关闭">×</button></div>
+          <div class="dlg-body stack">
+            <div class="src-card">
+              <span class="tool">Cx</span><div class="src-main"><b>Codex</b><span class="hint">~/.codex/sessions · 425 个对话</span></div>
+              <span class="state ok">已连接</span><button class="btn sm">更换文件夹</button><span class="mk">1</span>
+            </div>
+            <div class="src-card">
+              <span class="tool">Cl</span><div class="src-main"><b>Claude Code</b><span class="hint">~/.claude/projects · 5 个对话</span></div>
+              <span class="state ok">已连接</span><button class="btn sm">更换文件夹</button>
+            </div>
+            <div class="src-card off">
+              <span class="tool off">G</span><div class="src-main"><b>ChatGPT、Claude 网页版</b><span class="hint">在网页设置里导出数据，把 conversations.json 拖到这里 · 怎么导出？</span></div>
+              <span class="state no">未添加</span><button class="btn sm">选择文件</button><span class="mk">2</span>
+            </div>
+            <div class="src-card off">
+              <span class="tool off">+</span><div class="src-main"><b class="muted">其他 AI 工具</b><span class="hint">复制整段对话粘贴进来</span></div>
+              <span class="state no">P1</span><span class="mk">3</span>
+            </div>
+            <p class="note-line">所有记录只在这个浏览器里读取和计算，不会上传。开启 AI 精修后，也只发送候选里的几句原话。 <span class="mk">4</span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    <h2>记录来源</h2>
+    <p class="lead">点「发现」里的「管理来源」打开。网页不能自己去翻硬盘，所以由你授权一次。</p>
+    <ol>
+      <li><span class="mk">1</span><span>本地 Agent 工具：在 Chrome / Edge 里选一次记录文件夹，浏览器记住授权。隐藏文件夹在选择窗口里按 ⌘⇧. 显示。</span></li>
+      <li><span class="mk">2</span><span>网页版 AI：在官方设置里导出数据，拖入 conversations.json。</span></li>
+      <li><span class="mk">3</span><span>其他工具（P1）：粘贴整段对话。</span></li>
+      <li><span class="mk">4</span><span>隐私说明常驻在这里。来源有变化后自动扫描，这里不再放扫描按钮。</span></li>
+    </ol>
+  </aside>
+</section>
+
+<!-- 库 -->
+<section class="screen" id="s-main" hidden>
+  <div class="canvas">
+    <div class="app" data-frame="main">
+      <aside class="side">
+        <div class="brand"><span class="logo">PromptBox</span><span class="gh">GitHub</span><span class="mk">13</span></div>
+        <div class="nav-item big" data-go="discover">发现<i class="new">5</i><span class="mk">1</span></div>
+        <div class="nav-label">库</div>
+        <div class="nav-item on">全部<em>8</em></div>
+        <div class="nav-label">类型 <span class="mk">2</span></div>
+        <div class="nav-item"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>提示词<em>6</em></div>
+        <div class="nav-item"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4M7 2v4L4.5 8.5h7L9 6V2M8 8.5V14"/></svg>规则<em>2</em></div>
+        <div class="nav-label">标签</div>
+        <div class="nav-item"># 写作<em>4</em></div>
+        <div class="nav-item"># 工作<em>2</em></div>
+        <div class="nav-item"># 编程<em>2</em></div>
+        <div class="nav-item"># 产品<em>1</em></div>
+        <div class="side-foot">
+          <button data-go="import">导入</button>
+          <button data-go="settings">设置<i class="dot"></i></button>
+          <button>反馈</button>
+          <span class="mk">12</span>
+        </div>
+      </aside>
+
+      <section class="list">
+        <div class="list-head">
+          <div class="search" data-go="search">搜索，或描述你想写什么</div><span class="mk">4</span>
+          <button class="btn">+ 新建</button><span class="mk">5</span>
+        </div>
+        <div class="banner">
+          你的数据只保存在这个浏览器里，不会上传。下面 8 条是示例。 <span class="mk">3</span>
+          <div class="row"><button class="btn sm">清除示例</button><button class="btn sm ghost">知道了</button></div>
+        </div>
+        <div class="list-meta">8 条 · 按最近修改 <span class="mk">6</span></div>
+        <div class="items">
+          <div class="item on" data-pick="prompt">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>周报生成</div>
+            <div class="item-snip">你是一位擅长职场写作的助手。请根据我本周的工作记录，写一份周报。</div>
+            <div class="item-foot"><span class="tag">写作</span><span class="tag">工作</span><span class="time">14:32</span></div>
+          </div>
+          <div class="item" data-pick="skill">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>需求文档评审</div>
+            <div class="item-snip">按目标、范围、流程、验收四个维度评审需求文档，逐条列出问题和建议。</div>
+            <div class="item-foot"><span class="tag">产品</span><span class="time">11:08</span></div>
+          </div>
+          <div class="item">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4M7 2v4L4.5 8.5h7L9 6V2M8 8.5V14"/></svg>前端项目规则</div>
+            <div class="item-snip">使用 TypeScript；组件放在 src/components；提交前先跑测试。</div>
+            <div class="item-foot"><span class="tag">编程</span><span class="time">昨天</span></div>
+          </div>
+          <div class="item">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>小红书标题 10 连</div>
+            <div class="item-snip">围绕「{{主题}}」写 10 个小红书标题，每个不超过 20 字，风格各不相同。</div>
+            <div class="item-foot"><span class="tag">写作</span><span class="time">昨天</span></div>
+          </div>
+          <div class="item">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>代码审查清单</div>
+            <div class="item-snip">请从正确性、可读性、性能、安全四个方面审查下面的代码，按严重程度排序。</div>
+            <div class="item-foot"><span class="tag">编程</span><span class="time">10月14日</span></div>
+          </div>
+          <div class="item">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>中英翻译润色</div>
+            <div class="item-snip">把中文翻译成自然的英文，保留专业术语，不逐字直译。</div>
+            <div class="item-foot"><span class="tag">写作</span><span class="time">10月13日</span></div>
+          </div>
+          <div class="item">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>会议纪要整理</div>
+            <div class="item-snip">把会议记录整理成「结论 / 待办 / 负责人 / 截止时间」四栏。</div>
+            <div class="item-foot"><span class="tag">工作</span><span class="time">10月12日</span></div>
+          </div>
+          <div class="item">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4M7 2v4L4.5 8.5h7L9 6V2M8 8.5V14"/></svg>我的写作偏好</div>
+            <div class="item-snip">先给结论，再给理由；不用套话；每段不超过 4 行。</div>
+            <div class="item-foot"><span class="tag">写作</span><span class="time">10月10日</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="detail" data-variant="prompt">
+        <div class="detail-head">
+          <div class="title">周报生成</div>
+          <div class="actions">
+            <button class="btn primary" data-go="copy">复制</button><span class="mk">7</span>
+            <button class="btn" data-go="export">导出</button>
+            <button class="btn" data-go="history">历史 3</button>
+            <button class="btn icon" aria-label="更多">⋯</button><span class="mk">8</span>
+          </div>
+        </div>
+        <div class="meta">
+          <div class="seg"><span class="on">提示词</span><span>规则</span></div><span class="mk">9</span>
+          <div class="tags"><span class="tag">写作 ×</span><span class="tag">工作 ×</span><span class="tag add">+ 标签</span></div>
+        </div>
+        <div class="fields">
+          <label>备注</label><div class="input">Claude 和 GPT 都试过，工作记录写得越具体效果越好</div>
+        </div>
+        <div class="editor"><pre>你是一位擅长职场写作的助手。请根据我本周的工作记录，写一份周报。
+
+要求：
+1. 分为「本周完成」「遇到的问题」「下周计划」三部分
+2. 每条不超过 30 字，突出结果和数据
+3. 语气：<span class="var">{{语气}}</span>
+
+本周工作记录：
+<span class="var">{{本周工作}}</span></pre></div>
+        <div class="editor-foot">
+          <span>来源：手动新建</span><span>· 变量</span><code>{{语气}}</code><code>{{本周工作}}</code><span class="mk">11</span>
+          <span class="saved">已自动保存 · 14:32</span><span class="mk">10</span>
+        </div>
+      </section>
+
+      <section class="detail" data-variant="skill" hidden>
+        <div class="detail-head">
+          <div class="title">需求文档评审</div>
+          <div class="actions">
+            <button class="btn primary">复制</button>
+            <button class="btn">导出</button>
+            <button class="btn">历史 1</button>
+            <button class="btn icon" aria-label="更多">⋯</button>
+          </div>
+        </div>
+        <div class="meta">
+          <div class="seg"><span class="on">提示词</span><span>规则</span></div>
+          <div class="tags"><span class="tag">产品 ×</span><span class="tag add">+ 标签</span></div>
+        </div>
+        <div class="fields">
+          <label>备注</label><div class="input muted">可选，比如适用的模型、来源</div>
+        </div>
+        <div class="editor"><pre># 需求文档评审
+
+按以下顺序评审用户提供的需求文档：
+
+1. 目标：是否写清楚要解决谁的什么问题
+2. 范围：做什么、不做什么是否明确
+3. 流程：主流程和异常流程是否完整
+4. 验收：每条需求能否被测试验证
+
+输出：先给总体结论，再按「问题 / 位置 / 建议」逐条列出。</pre></div>
+        <div class="editor-foot"><span>来源：导入 SKILL.md（prd-review）· 再导出成 Skill 时会带上名称和描述</span><span class="saved">已自动保存 · 11:08</span></div>
+      </section>
+    </div>
+  </div>
+  <aside class="notes">
+    <h2>库</h2>
+    <p class="lead">存放处：发现里保存的、手动新建的、导入的都在这里。核心路径「找到 → 复制」最少两步。</p>
+    <ol>
+      <li><span class="mk">1</span><span>「发现」在侧栏最上面，有新候选时显示数字。</span></li>
+      <li><span class="mk">2</span><span>筛选：全部 / 类型 / 标签。筛选「规则」时，列表顶部出现「合成规则文件」，把全部规则导出成 AGENTS.md 或 CLAUDE.md。</span></li>
+      <li><span class="mk">3</span><span>首次打开的提示条，「清除示例」只删示例。</span></li>
+      <li><span class="mk">4</span><span>搜索框也是说需求的地方，点一下看「搜索·说需求」。</span></li>
+      <li><span class="mk">5</span><span>新建：手动写一条。</span></li>
+      <li><span class="mk">6</span><span>列表只负责"选中"，不放复制按钮。选中后按回车 = 复制。点「需求文档评审」看从 SKILL.md 导入的提示词。</span></li>
+      <li><span class="mk">7</span><span>复制是主操作；有变量时弹出填写框。</span></li>
+      <li><span class="mk">8</span><span>导出、历史（P1）、⋯（删除，6 秒内可撤销）。</span></li>
+      <li><span class="mk">9</span><span>类型只有两种：提示词（做某件事的方法，用的时候复制）和规则（一直要遵守的习惯）。Skill 不是单独的类型，是提示词的一种导出格式。</span></li>
+      <li><span class="mk">10</span><span>自动保存，没有保存按钮。</span></li>
+      <li><span class="mk">11</span><span>显示这条从哪来（手动新建 / 发现 / 导入 / 生成），以及识别到的变量。</span></li>
+      <li><span class="mk">12</span><span>导入（.md 和备份）· 设置（AI 模型、备份）· 反馈。</span></li>
+      <li><span class="mk">13</span><span>开源仓库链接。</span></li>
+    </ol>
+  </aside>
+</section>
+
+<!-- 搜索·说需求 -->
+<section class="screen" id="s-search" hidden>
+  <div class="canvas">
+    <div class="app" data-frame="search">
+      <aside class="side">
+        <div class="brand"><span class="logo">PromptBox</span><span class="gh">GitHub</span></div>
+        <div class="nav-item big" data-go="discover">发现<i class="new">5</i></div>
+        <div class="nav-label">库</div>
+        <div class="nav-item on" data-go="main">全部<em>8</em></div>
+        <div class="nav-label">类型</div>
+        <div class="nav-item"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>提示词<em>6</em></div>
+        <div class="nav-item"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4M7 2v4L4.5 8.5h7L9 6V2M8 8.5V14"/></svg>规则<em>2</em></div>
+        <div class="nav-label">标签</div>
+        <div class="nav-item"># 写作<em>4</em></div>
+        <div class="nav-item"># 工作<em>2</em></div>
+        <div class="nav-item"># 编程<em>2</em></div>
+        <div class="nav-item"># 产品<em>1</em></div>
+        <div class="side-foot">
+          <button data-go="import">导入</button>
+          <button data-go="settings">设置<i class="dot"></i></button>
+          <button>反馈</button>
+        </div>
+      </aside>
+
+      <section class="list">
+        <div class="list-head">
+          <div class="search typed">想写一篇小红书，介绍周末去的咖啡店</div><span class="mk">1</span>
+          <button class="btn">+ 新建</button>
+        </div>
+        <div class="gen-row" data-go="generate">
+          <div><b>按我的风格生成一条</b><small>参考库里 2 条相关内容和你的规则</small></div><span class="go">→</span><span class="mk">2</span>
+        </div>
+        <div class="list-meta">找到 2 条相关 <span class="mk">3</span></div>
+        <div class="items">
+          <div class="item on">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>小红书标题 10 连</div>
+            <div class="item-snip">围绕「{{主题}}」写 10 个小红书标题，每个不超过 20 字，风格各不相同。</div>
+            <div class="item-foot"><span class="tag">写作</span><span class="time">高度相关</span></div>
+          </div>
+          <div class="item">
+            <div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4M7 2v4L4.5 8.5h7L9 6V2M8 8.5V14"/></svg>我的写作偏好</div>
+            <div class="item-snip">先给结论，再给理由；不用套话；每段不超过 4 行。</div>
+            <div class="item-foot"><span class="tag">写作</span><span class="time">相关</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="detail">
+        <div class="detail-head">
+          <div class="title">小红书标题 10 连</div>
+          <div class="actions">
+            <button class="btn primary">复制</button>
+            <button class="btn">导出</button>
+            <button class="btn">历史 2</button>
+            <button class="btn icon" aria-label="更多">⋯</button>
+          </div>
+        </div>
+        <div class="meta">
+          <div class="seg"><span class="on">提示词</span><span>规则</span></div>
+          <div class="tags"><span class="tag">写作 ×</span><span class="tag add">+ 标签</span></div>
+        </div>
+        <div class="editor"><pre>围绕「<span class="var">{{主题}}</span>」写 10 个小红书标题。
+
+要求：
+1. 每个不超过 20 字
+2. 风格各不相同：提问、数字、反差、情绪各占几个
+3. 不用"绝绝子""yyds"这类过时的词</pre></div>
+        <div class="editor-foot"><span>来源：发现 · 来自 4 次对话</span><span class="saved">已自动保存 · 昨天</span></div>
+      </section>
+    </div>
+  </div>
+  <aside class="notes">
+    <h2>搜索·说需求</h2>
+    <p class="lead">搜索框有两种用法：输入关键词就是搜索，输入一句需求也行。</p>
+    <ol>
+      <li><span class="mk">1</span><span>同一个输入框，不另外放"生成"入口。</span></li>
+      <li><span class="mk">2</span><span>有输入时，结果最上面多一行「按我的风格生成」。搜到合适的就直接用，没有满意的再生成。点它看生成页。</span></li>
+      <li><span class="mk">3</span><span>按相关度排序：标题、标签匹配的权重更高；规则也会被找出来。第一版用关键词检索，换了说法的（比如"种草文案"）后续用语义检索补上。</span></li>
+    </ol>
+  </aside>
+</section>
+
+<!-- 按风格生成 -->
+<section class="screen" id="s-generate" hidden>
+  <div class="canvas">
+    <div class="app" data-clone="search">
+      <div class="scrim">
+        <div class="dialog wide">
+          <div class="dlg-head"><b>按我的风格写提示词</b><button class="x" data-go="search" aria-label="关闭">×</button></div>
+          <div class="dlg-body">
+            <div class="ask">想写一篇小红书，介绍周末去的咖啡店 <span class="mk" style="margin-left:auto">1</span></div>
+            <div class="cols gen">
+              <div>
+                <div class="sec-label">参考了这些 · 可以取消勾选 <span class="mk">2</span></div>
+                <div class="ref"><span class="cb on"></span><span>小红书标题 10 连<small>提示词 · 高度相关</small></span></div>
+                <div class="ref"><span class="cb on"></span><span>我的写作偏好<small>规则 · 先给结论 / 不用套话 / 每段不超过 4 行</small></span></div>
+                <div class="ref"><span class="cb on"></span><span>回答用中文<small>规则 · 每次都会带上</small></span></div>
+              </div>
+              <div id="gen-key">
+                <div class="sec-label">生成结果 <span class="mk">3</span></div>
+                <div class="box"><pre>你是一位小红书博主，擅长写探店笔记。请根据下面的信息写一篇笔记：
+
+店名和位置：<span class="var">{{店名和位置}}</span>
+我的体验：<span class="var">{{体验}}</span>
+
+要求：
+1. 先给一个不超过 20 字的标题
+2. 开头一句话给结论：值不值得去
+3. 不用套话，每段不超过 4 行
+4. 结尾加 3 个话题标签</pre></div>
+              </div>
+              <div id="gen-nokey" hidden>
+                <div class="sec-label">第 1 步：复制生成指令，贴到你常用的 AI 里</div>
+                <div class="box"><pre>请帮我写一条提示词，任务：写一篇小红书，介绍周末去的咖啡店。
+参考我以前的写法：
+示例：围绕「{{主题}}」写 10 个小红书标题，每个不超过 20 字……
+遵守我的习惯：先给结论；不用套话；每段不超过 4 行；用中文。
+输出一条能直接用的提示词，可替换的部分用 {{变量}} 标出。</pre></div>
+                <div class="sec-label" style="margin-top:12px">第 2 步：把 AI 写好的提示词粘贴到这里</div>
+                <div class="input area muted">粘贴到这里</div>
+              </div>
+            </div>
+          </div>
+          <div class="dlg-foot" id="foot-key"><span class="hint muted">用设置里的模型生成</span><button class="btn">重新生成</button><button class="btn">复制</button><button class="btn primary" data-go="main">存进库</button><span class="mk">4</span></div>
+          <div class="dlg-foot" id="foot-nokey" hidden><span class="hint muted">还没有设置模型 Key</span><button class="btn">复制生成指令</button><button class="btn primary" data-go="main">存进库</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    <h2>按风格生成</h2>
+    <p class="lead">点搜索结果最上面的「按我的风格生成」打开。"你的风格"来自两样东西：相关的旧提示词，加上你的规则。</p>
+    <ol>
+      <li><span class="mk">1</span><span>需求带过来，可以改。</span></li>
+      <li><span class="mk">2</span><span>自动找出的参考内容，可以取消勾选。生成后会记下参考了哪几条，方便判断准不准。</span></li>
+      <li><span class="mk">3</span><span>结果里可替换的部分自动标成 {{变量}}。</span></li>
+      <li><span class="mk">4</span><span>填了 Key：直接生成，可以重新生成、复制或存进库。没填 Key：复制生成指令到你常用的 AI，再把结果粘回来。点下面按钮切换看看。</span></li>
+    </ol>
+    <p class="ctl"><button class="btn" id="toggle-key">切换：没填 Key</button></p>
+  </aside>
+</section>
+
+<!-- 复制·填变量 -->
+<section class="screen" id="s-copy" hidden>
+  <div class="canvas">
+    <div class="app" data-clone="main">
+      <div class="scrim">
+        <div class="dialog mid">
+          <div class="dlg-head"><b>填写变量</b><span class="sub">周报生成 · 2 个变量</span><button class="x" data-go="main" aria-label="关闭">×</button><span class="mk">4</span></div>
+          <div class="dlg-body">
+            <div class="cols">
+              <div>
+                <div class="sec-label">变量 <span class="mk">1</span></div>
+                <div class="var-field"><label>语气</label><div class="input">简洁、正式</div></div>
+                <div class="var-field"><label>本周工作</label><div class="input area">完成登录页改版并上线；修复 3 个线上 bug；和设计师对齐新版首页方案</div></div>
+              </div>
+              <div>
+                <div class="sec-label">预览 <span class="mk">2</span></div>
+                <div class="box"><pre>你是一位擅长职场写作的助手。请根据我本周的工作记录，写一份周报。
+
+要求：
+1. 分为「本周完成」「遇到的问题」「下周计划」三部分
+2. 每条不超过 30 字，突出结果和数据
+3. 语气：<mark>简洁、正式</mark>
+
+本周工作记录：
+<mark>完成登录页改版并上线；修复 3 个线上 bug；和设计师对齐新版首页方案</mark></pre></div>
+              </div>
+            </div>
+          </div>
+          <div class="dlg-foot">
+            <span class="hint muted">⌘↵ 复制结果</span>
+            <button class="btn" data-go="main">原样复制</button>
+            <button class="btn primary" data-go="main">复制结果</button><span class="mk">3</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    <h2>复制·填变量</h2>
+    <p class="lead">点「复制」且正文里有变量时出现。</p>
+    <ol>
+      <li><span class="mk">1</span><span>每个变量一个输入框，按在正文里出现的顺序排列，同名变量只填一次。输入框可以多行。</span></li>
+      <li><span class="mk">2</span><span>实时预览，填入的值高亮。没填的变量保留原样。</span></li>
+      <li><span class="mk">3</span><span>「复制结果」是主操作；「原样复制」复制带 {{变量}} 的原文。复制后关闭并提示"已复制"。</span></li>
+      <li><span class="mk">4</span><span>右上角 × 或 Esc 关闭。所有弹窗都只有这一个关闭按钮。</span></li>
+    </ol>
+  </aside>
+</section>
+
+<!-- 导出 -->
+<section class="screen" id="s-export" hidden>
+  <div class="canvas">
+    <div class="app" data-clone="main">
+      <div class="scrim">
+        <div class="dialog wide">
+          <div class="dlg-head"><b>导出</b><span class="sub">周报生成</span><button class="x" data-go="main" aria-label="关闭">×</button></div>
+          <div class="dlg-body">
+            <div class="cols exp">
+              <div>
+                <div class="sec-label">格式 <span class="mk">1</span></div>
+                <div class="opts">
+                  <div class="opt on"><span class="radio"></span><span>SKILL.md<small>Claude Code 等 Agent 的技能文件</small></span></div>
+                  <div class="opt"><span class="radio"></span><span>AGENTS.md<small>Codex 等工具读取的项目规则</small></span></div>
+                  <div class="opt"><span class="radio"></span><span>CLAUDE.md<small>Claude Code 读取的项目规则</small></span></div>
+                  <div class="opt"><span class="radio"></span><span>普通 .md<small>原样导出正文</small></span></div>
+                </div>
+                <div class="sec-label">SKILL.md 必填 <span class="mk">2</span></div>
+                <div class="fields">
+                  <label>英文短名</label><div class="input">weekly-report<span class="hint">小写字母、数字、连字符</span></div>
+                  <label>描述</label><div class="input">根据一周的工作记录写周报。在用户要求写周报、总结本周工作时使用。<span class="hint">写清"什么时候用"</span></div>
+                </div>
+              </div>
+              <div class="stack">
+                <div class="sec-label">预览 <span class="mk">3</span></div>
+                <div class="box"><pre><span class="fm">---
+name: weekly-report
+description: 根据一周的工作记录写周报。在用户要求写周报、总结本周工作时使用。
+---</span>
+
+你是一位擅长职场写作的助手。请根据我本周的工作记录，写一份周报。
+
+要求：
+1. 分为「本周完成」「遇到的问题」「下周计划」三部分
+2. 每条不超过 30 字，突出结果和数据
+3. 语气：{{语气}}
+
+本周工作记录：
+{{本周工作}}</pre></div>
+                <div class="note-line">放到 <code>~/.claude/skills/weekly-report/SKILL.md</code>，Claude Code 就能使用 <span class="mk">4</span></div>
+                <div class="note-line">正文里有 2 个变量，导出后原样保留</div>
+              </div>
+            </div>
+          </div>
+          <div class="dlg-foot">
+            <button class="btn" data-go="main">复制文件内容</button>
+            <button class="btn primary" data-go="main">下载 SKILL.md</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    <h2>导出</h2>
+    <p class="lead">点详情顶部「导出」打开。这里演示把一条提示词导出成 Skill。</p>
+    <ol>
+      <li><span class="mk">1</span><span>提示词默认导出 .md，也可以导出成 SKILL.md，变成 Agent 能自动调用的技能；规则默认导出 AGENTS.md。</span></li>
+      <li><span class="mk">2</span><span>选 SKILL.md 时必填英文短名和描述，填过的会存回这条内容。</span></li>
+      <li><span class="mk">3</span><span>预览最终文件，包括头信息。</span></li>
+      <li><span class="mk">4</span><span>告诉用户文件放哪里才能生效；有变量时提醒一句。</span></li>
+    </ol>
+    <p class="foot">多条规则合成一个文件，在库里筛选「规则」后操作。</p>
+  </aside>
+</section>
+
+<!-- 导入文件 -->
+<section class="screen" id="s-import" hidden>
+  <div class="canvas">
+    <div class="app" data-clone="main">
+      <div class="scrim">
+        <div class="dialog">
+          <div class="dlg-head"><b>导入 4 个文件</b><button class="x" data-go="main" aria-label="关闭">×</button></div>
+          <div class="dlg-body">
+            <table class="tbl">
+              <thead><tr><th>文件</th><th>识别为 <span class="mk">1</span></th><th>结果</th></tr></thead>
+              <tbody>
+                <tr><td><code>SKILL.md</code></td><td>提示词（Skill 名称：meeting-notes）</td><td>新增 1 条</td></tr>
+                <tr><td><code>AGENTS.md</code></td><td>规则</td><td>新增 1 条</td></tr>
+                <tr><td><code>promptbox-backup-2026-10-10.json</code></td><td>备份（15 条）</td><td>新增 12 条<br><span class="muted">跳过 3 条（已存在）</span> <span class="mk">2</span></td></tr>
+                <tr><td><code>截图.png</code></td><td class="muted">不支持</td><td class="muted">跳过</td></tr>
+              </tbody>
+            </table>
+            <p class="note-line" style="margin-top:12px">已存在的条目不会被覆盖。聊天记录不从这里进，请用「发现」里的「管理来源」。</p>
+          </div>
+          <div class="dlg-foot">
+            <button class="btn primary" data-go="main">导入 14 条</button><span class="mk">3</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    <h2>导入文件</h2>
+    <p class="lead">导入现成的提示词文件或备份。点侧栏「导入」，或把文件拖进窗口。</p>
+    <ol>
+      <li><span class="mk">1</span><span>逐个识别：SKILL.md → 提示词（记住 Skill 名称和描述）；CLAUDE.md、AGENTS.md → 规则；其他 .md → 提示词；.json → 备份。</span></li>
+      <li><span class="mk">2</span><span>备份里已存在的条目跳过，不覆盖。</span></li>
+      <li><span class="mk">3</span><span>确认后才写入。</span></li>
+    </ol>
+  </aside>
+</section>
+
+<!-- 设置 -->
+<section class="screen" id="s-settings" hidden>
+  <div class="canvas">
+    <div class="app" data-clone="main">
+      <div class="scrim">
+        <div class="dialog narrow">
+          <div class="dlg-head"><b>设置</b><button class="x" data-go="main" aria-label="关闭">×</button></div>
+          <div class="dlg-body stack">
+            <div>
+              <div class="sec-label">AI 模型 · 可选 <span class="mk">1</span></div>
+              <div class="fields">
+                <label>服务商</label><div class="input">选择服务商 ▾</div>
+                <label>API Key</label><div class="input">sk-••••••••••••3f2a</div>
+                <label>模型</label><div class="input">选择模型 ▾</div>
+              </div>
+              <p class="note-line" style="margin-top:8px">用于两件事：精修发现的候选、按你的风格生成。只发送候选原话和你的需求，不发送完整聊天记录。Key 只存在这个浏览器里。 <span class="mk">2</span></p>
+            </div>
+            <div class="box">
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="flex:1"><b style="font-size:13px">备份</b><span class="hint">库里的内容和发现的处理记录，不含聊天记录原文</span></div>
+                <button class="btn primary">导出备份文件</button><span class="mk">3</span>
+              </div>
+              <p class="hint" style="margin-top:8px">上次备份：9 天前，之后有改动。恢复备份用侧栏「导入」。</p>
+            </div>
+            <p style="font-size:13px"><b>数据存在哪：</b>只在这个浏览器里，不会上传。清除浏览器数据、换浏览器或换电脑时，数据不会跟着走。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    <h2>设置</h2>
+    <p class="lead">点侧栏「设置」打开。久未备份时，侧栏「设置」旁出现提醒点。</p>
+    <ol>
+      <li><span class="mk">1</span><span>模型是可选的：不填也能用全部功能，只是精修用规则、生成要复制到你自己的 AI。支持哪几家服务，开发前逐个验证能不能在浏览器里直接调用。</span></li>
+      <li><span class="mk">2</span><span>写清楚用途和会发送什么。</span></li>
+      <li><span class="mk">3</span><span>备份库和处理记录（比如忽略过哪些候选），不含聊天记录原文。</span></li>
+    </ol>
+  </aside>
+</section>
+
+<!-- 空状态 -->
+<section class="screen" id="s-empty" hidden>
+  <div class="canvas">
+    <div class="app">
+      <aside class="side">
+        <div class="brand"><span class="logo">PromptBox</span><span class="gh">GitHub</span></div>
+        <div class="nav-item big">发现</div>
+        <div class="nav-label">库</div>
+        <div class="nav-item on">全部<em>0</em></div>
+        <div class="nav-label">类型</div>
+        <div class="nav-item"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>提示词<em>0</em></div>
+        <div class="nav-item"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4M7 2v4L4.5 8.5h7L9 6V2M8 8.5V14"/></svg>规则<em>0</em></div>
+        <div class="nav-label">标签</div>
+        <div class="nav-empty">还没有标签</div>
+        <div class="side-foot">
+          <button>导入</button>
+          <button>设置</button>
+          <button>反馈</button>
+        </div>
+      </aside>
+      <section class="list">
+        <div class="list-head">
+          <div class="search">搜索，或描述你想写什么</div>
+          <button class="btn">+ 新建</button>
+        </div>
+        <div class="empty">
+          <b>库里还没有内容</b>
+          <span>去侧栏「发现」，从你的对话里找；<br>或者点上方「新建」写一条，<br>也可以把 .md 文件、备份文件拖进窗口。</span>
+          <span class="mk">1</span>
+        </div>
+      </section>
+      <section class="detail">
+        <div class="placeholder">选中左侧一条内容，在这里查看和编辑 <span class="mk">2</span></div>
+      </section>
+      <div class="drop" id="drop" hidden>
+        <b>松开即可导入</b>
+        <span>支持 .md 文件和备份 .json，可以一次拖多个</span>
+        <span class="mk">3</span>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    <h2>空状态</h2>
+    <p class="lead">清除示例后，或者用户删光内容时。</p>
+    <ol>
+      <li><span class="mk">1</span><span>用文字指向已有入口（发现、新建、拖入），不重复放按钮。</span></li>
+      <li><span class="mk">2</span><span>右侧没有选中内容时的占位提示。</span></li>
+      <li><span class="mk">3</span><span>拖入文件时整个窗口变成接收区。</span></li>
+    </ol>
+    <p class="ctl"><button class="btn" id="toggle-drop">模拟拖入文件</button></p>
+    <p class="foot">搜索无结果时：没有找到相关内容，可以点「按我的风格生成」写一条新的。</p>
+  </aside>
+</section>
+
+<!-- 版本历史 P1 -->
+<section class="screen" id="s-history" hidden>
+  <div class="canvas">
+    <div class="app" data-clone="main">
+      <div class="scrim">
+        <div class="dialog wide">
+          <div class="dlg-head"><b>版本历史</b><span class="sub">周报生成 · 共 3 个版本</span><button class="x" data-go="main" aria-label="关闭">×</button></div>
+          <div class="dlg-body">
+            <div class="cols ver">
+              <div>
+                <div class="sec-label">版本</div>
+                <div class="vers">
+                  <div class="ver"><b>v3 · 当前</b><small>今天 14:32 · <span class="plus">+2</span> <span class="minus">−1</span></small></div>
+                  <div class="ver on"><b>v2</b><small>昨天 21:05 · <span class="plus">+5</span> <span class="minus">−1</span></small></div>
+                  <div class="ver"><b>v1 · 创建</b><small>10月14日 09:12</small></div>
+                </div>
+              </div>
+              <div>
+                <div class="compare">对比 <span class="select">v2 ▾</span> → <span class="select">v3 当前 ▾</span><span class="stat"><span class="plus">新增 2 行</span> · <span class="minus">删除 1 行</span></span></div>
+                <div class="diff">
+                  <div><span></span><span>你是一位擅长职场写作的助手。请根据我本周的工作记录，写一份周报。</span></div>
+                  <div><span></span><span> </span></div>
+                  <div><span></span><span>要求：</span></div>
+                  <div><span></span><span>1. 分为「本周完成」「遇到的问题」「下周计划」三部分</span></div>
+                  <div class="d"><span>−</span><span>2. 每条不超过 50 字</span></div>
+                  <div class="a"><span>+</span><span>2. 每条不超过 30 字，突出结果和数据</span></div>
+                  <div class="a"><span>+</span><span>3. 语气：{{语气}}</span></div>
+                  <div><span></span><span> </span></div>
+                  <div><span></span><span>本周工作记录：</span></div>
+                  <div><span></span><span>{{本周工作}}</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="dlg-foot">
+            <span class="hint muted">恢复后会生成 v4，历史不会丢</span>
+            <button class="btn primary" data-go="main">恢复成 v2</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    <h2>版本历史 · P1</h2>
+    <p class="lead">第一版先不做，这里保留 v0.1 的设计：离开一条内容时如果正文有改动，自动生成一个版本；任选两版对比；恢复会生成新版本，历史不丢。</p>
+  </aside>
+</section>
+
+<!-- 手机端 P1 -->
+<section class="screen" id="s-mobile" hidden>
+  <div class="canvas">
+    <div class="phones">
+      <div>
+        <p class="phone-cap">列表页</p>
+        <div class="phone">
+          <div class="p-status"></div>
+          <div class="p-bar"><span class="p-btn">筛选</span><span class="grow">PromptBox</span><span class="p-btn">+</span><span class="p-btn">⋯</span></div>
+          <div class="p-search"><div class="search">搜索，或描述你想写什么</div></div>
+          <div class="banner">数据只保存在这个浏览器里。下面 8 条是示例。
+            <div class="row"><button class="btn sm">清除示例</button><button class="btn sm ghost">知道了</button></div>
+          </div>
+          <div class="items">
+            <div class="item"><div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>周报生成</div><div class="item-snip">你是一位擅长职场写作的助手。请根据我本周的工作记录，写一份周报。</div></div>
+            <div class="item"><div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>需求文档评审</div><div class="item-snip">按目标、范围、流程、验收四个维度评审需求文档。</div></div>
+            <div class="item"><div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4M7 2v4L4.5 8.5h7L9 6V2M8 8.5V14"/></svg>前端项目规则</div><div class="item-snip">使用 TypeScript；组件放在 src/components。</div></div>
+            <div class="item"><div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>小红书标题 10 连</div><div class="item-snip">围绕「{{主题}}」写 10 个小红书标题。</div></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="phone-cap">筛选面板</p>
+        <div class="phone">
+          <div class="p-status"></div>
+          <div class="p-bar"><span class="p-btn">筛选</span><span class="grow">PromptBox</span><span class="p-btn">+</span><span class="p-btn">⋯</span></div>
+          <div class="p-search"><div class="search">搜索，或描述你想写什么</div></div>
+          <div class="items">
+            <div class="item"><div class="item-title"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>周报生成</div><div class="item-snip">你是一位擅长职场写作的助手。</div></div>
+          </div>
+          <div class="p-scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div class="sec-label">类型</div>
+            <div class="chips"><span class="chip on">全部 8</span><span class="chip">提示词 6</span><span class="chip">规则 2</span></div>
+            <div class="sec-label">标签</div>
+            <div class="chips"><span class="chip">写作 4</span><span class="chip">工作 2</span><span class="chip">编程 2</span><span class="chip">产品 1</span></div>
+            <button class="btn primary" style="width:100%">完成</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="phone-cap">详情页（打开了 ⋯）</p>
+        <div class="phone">
+          <div class="p-status"></div>
+          <div class="p-bar"><span class="p-btn">‹ 返回</span><span class="grow"></span><button class="btn primary sm">复制</button><span class="p-btn">⋯</span></div>
+          <div class="p-menu"><div>导出</div><div>历史 3</div><div class="danger">删除</div></div>
+          <div class="p-body">
+            <div class="title">周报生成</div>
+            <div class="meta">
+              <div class="seg"><span class="on">提示词</span><span>规则</span></div>
+            </div>
+            <div class="editor"><pre>你是一位擅长职场写作的助手。请根据我本周的工作记录，写一份周报。
+
+要求：
+1. 分为「本周完成」「遇到的问题」「下周计划」三部分
+2. 每条不超过 30 字，突出结果和数据
+3. 语气：<span class="var">{{语气}}</span></pre></div>
+          </div>
+          <div class="p-foot"><span>2 个变量</span><span class="saved">已自动保存</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    <h2>手机端 · P1</h2>
+    <p class="lead">第一版先不做。窄屏时变成两层：列表 → 详情，每个操作仍然只在一个地方。「发现」放进左上角的菜单。</p>
+  </aside>
+</section>
+
+<script>
+(function () {
+  // 弹窗页的背景复用对应的主画面，去掉背景里的标注和热区
+  document.querySelectorAll('.app[data-clone]').forEach(function (app) {
+    var source = document.querySelector('.app[data-frame="' + app.dataset.clone + '"]');
+    app.insertAdjacentHTML('afterbegin', source.innerHTML);
+    app.querySelectorAll('[data-go], [data-pick], .mk').forEach(function (el) {
+      if (el.closest('.scrim')) return;
+      if (el.classList.contains('mk')) el.remove();
+      el.removeAttribute('data-go');
+      el.removeAttribute('data-pick');
+    });
+  });
+
+  var screens = Array.prototype.slice.call(document.querySelectorAll('.screen'));
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tabs [data-go]'));
+  // 弹窗按 Esc 回到哪一屏
+  var dialogBase = { sources: 'discover', generate: 'search', copy: 'main', export: 'main', import: 'main', settings: 'main', history: 'main' };
+  var current = 'discover';
+
+  function go(id) {
+    if (!document.getElementById('s-' + id)) id = 'discover';
+    current = id;
+    screens.forEach(function (s) { s.hidden = s.id !== 's-' + id; });
+    tabs.forEach(function (t) { t.setAttribute('aria-current', t.dataset.go === id ? 'page' : 'false'); });
+    if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
+    window.scrollTo(0, 0);
+  }
+
+  document.addEventListener('click', function (e) {
+    var target = e.target.closest('[data-go]');
+    if (target) { e.preventDefault(); go(target.dataset.go); return; }
+    var pick = e.target.closest('[data-pick]');
+    var frame = pick && pick.closest('.app[data-frame]');
+    if (!frame) return;
+    frame.querySelectorAll('.item').forEach(function (i) { i.classList.toggle('on', i === pick); });
+    frame.querySelectorAll('.detail[data-variant]').forEach(function (d) { d.hidden = d.dataset.variant !== pick.dataset.pick; });
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && dialogBase[current]) go(dialogBase[current]);
+  });
+
+  window.addEventListener('hashchange', function () { go(location.hash.slice(1)); });
+
+  var marks = document.getElementById('marks');
+  marks.addEventListener('change', function () { document.body.classList.toggle('no-marks', !marks.checked); });
+
+  var drop = document.getElementById('drop');
+  var toggleDrop = document.getElementById('toggle-drop');
+  toggleDrop.addEventListener('click', function () {
+    drop.hidden = !drop.hidden;
+    toggleDrop.textContent = drop.hidden ? '模拟拖入文件' : '取消模拟';
+  });
+
+  var toggleKey = document.getElementById('toggle-key');
+  toggleKey.addEventListener('click', function () {
+    var noKey = document.getElementById('gen-key').hidden === false;
+    document.getElementById('gen-key').hidden = noKey;
+    document.getElementById('foot-key').hidden = noKey;
+    document.getElementById('gen-nokey').hidden = !noKey;
+    document.getElementById('foot-nokey').hidden = !noKey;
+    toggleKey.textContent = noKey ? '切换：已填 Key' : '切换：没填 Key';
+  });
+
+  go(location.hash.slice(1) || 'discover');
+})();
+</script>
+</body>
+</html>
