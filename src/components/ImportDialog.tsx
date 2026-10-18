@@ -81,7 +81,7 @@ export function ImportDialog({ entries, onImport, onClose }: Props) {
         </tbody>
       </table>
       <p className="note-line" style={{ marginTop: 12 }}>
-        已存在的条目不会被覆盖。聊天记录不从这里进，请用「发现」里的「管理记录来源」。
+        已存在的条目不会被覆盖。
       </p>
     </Dialog>
   );

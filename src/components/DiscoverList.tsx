@@ -1,8 +1,8 @@
 // 发现的列表：从对话里找出的候选，按出现次数排序。
 
 import { formatAgo, formatListTime } from '../logic/time';
-import type { Candidate, ItemType, SourceRecord, Tool } from '../types';
-import { RefreshIcon, SourcesIcon, TOOL_BADGES, TOOL_NAMES, TypeIcon, toolList } from './Icons';
+import type { Advice, Candidate, ItemType, SourceRecord } from '../types';
+import { RefreshIcon, TypeIcon } from './Icons';
 
 export type KindFilter = 'all' | ItemType;
 
@@ -13,105 +13,57 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string) => void;
   sources: SourceRecord[];
-  /** 示例对话里各工具的对话数；有真实记录后为空。 */
-  sampleTools: Partial<Record<Tool, number>> | null;
   scanning: { done: number; total: number } | null;
+  /** 有记住授权的文件夹，可以直接扫描；没有时点刷新会打开设置重新选。 */
   canRescan: boolean;
   onRescan: () => void;
+  /** 打开设置里的「记录来源」。 */
   onSources: () => void;
-  /** AI 提炼：没填 Key 时为 null。 */
-  refine: { pending: number } | null;
-  onRefine: () => void;
-  onSettings: () => void;
-  /** AI 判断为一次性、收起来的本地候选数。 */
-  hiddenCount: number;
-  showHidden: boolean;
-  onToggleHidden: () => void;
+  /** AI 对各条本地候选的意见，列表里标一下。 */
+  advice: Record<string, Advice>;
 }
-
-const SOURCE_TOOLS: { id: SourceRecord['id']; tool: Tool }[] = [
-  { id: 'codex', tool: 'codex' },
-  { id: 'claude-code', tool: 'claude-code' },
-  { id: 'web-export', tool: 'chatgpt' },
-];
 
 export function DiscoverList(props: Props) {
   const { candidates, kind, selectedId, onSelect, scanning } = props;
   const fresh = candidates.filter((candidate) => candidate.status === 'new');
   const visible = fresh.filter((candidate) => kind === 'all' || candidate.kind === kind);
-  const saved = candidates.filter((candidate) => candidate.status === 'saved').length;
-  const ignored = candidates.filter((candidate) => candidate.status === 'ignored').length;
   const count = (target: ItemType) => fresh.filter((candidate) => candidate.kind === target).length;
 
   const scanned = props.sources.reduce((sum, source) => sum + source.conversations, 0);
   const lastScan = Math.max(0, ...props.sources.map((source) => source.lastScanAt ?? 0));
-  const sampleTotal = props.sampleTools ? Object.values(props.sampleTools).reduce((sum, value) => sum + (value ?? 0), 0) : 0;
 
   return (
     <section className="list" aria-label="发现">
       <div className="disc-head">
         <div className="disc-top">
           <b>发现</b>
-          <button
-            type="button"
-            className={`icon-btn${scanning ? ' spin' : ''}`}
-            title={props.canRescan ? '扫描新对话' : '先添加记录来源'}
-            aria-label="扫描新对话"
-            disabled={!!scanning || !props.canRescan}
-            onClick={props.onRescan}
-          >
-            <RefreshIcon />
-          </button>
-        </div>
-        <div className="disc-sub">从你的对话里找出值得保存的提示词和规则</div>
-        <div className="src-icons">
-          {props.sampleTools
-            ? (Object.keys(props.sampleTools) as Tool[]).map((tool) => (
-                <span key={tool} className="tool" title={`示例 · ${TOOL_NAMES[tool]} · ${props.sampleTools?.[tool]} 个对话`}>
-                  {TOOL_BADGES[tool]}
-                </span>
-              ))
-            : SOURCE_TOOLS.map(({ id, tool }) => {
-                const source = props.sources.find((record) => record.id === id);
-                const name = id === 'web-export' ? 'ChatGPT、Claude 网页版' : TOOL_NAMES[tool];
-                return (
-                  <span key={id} className={`tool${source ? '' : ' off'}`} title={source ? `${name} · ${source.conversations} 个对话` : `${name} · 未添加`}>
-                    {TOOL_BADGES[tool]}
-                  </span>
-                );
-              })}
-          <span className="meta" title={lastScan ? `上次扫描：${formatAgo(lastScan)} ${formatListTime(lastScan)}` : undefined}>
-            {scanning
-              ? `正在读取 ${scanning.done}/${scanning.total}`
-              : props.sampleTools
-                ? `示例对话 · ${sampleTotal} 个`
-                : scanned
-                  ? `已扫描 ${scanned} 个对话`
-                  : '还没有记录来源'}
-          </span>
-          <button type="button" className="icon-btn" title="管理记录来源" aria-label="管理记录来源" onClick={props.onSources}>
-            <SourcesIcon />
-          </button>
-        </div>
-        {scanning && (
-          <div className="progress" aria-hidden="true">
-            <i style={{ width: `${scanning.total ? (scanning.done / scanning.total) * 100 : 0}%` }} />
-          </div>
-        )}
-        <div className="refine-row">
-          {props.refine ? (
-            <>
-              <button type="button" className="btn sm" disabled={!!scanning || props.refine.pending === 0} onClick={props.onRefine}>
-                AI 提炼
-              </button>
-              <span>{props.refine.pending ? `让模型再筛一遍 ${props.refine.pending} 条本地候选` : '本地候选都提炼过了'}</span>
-            </>
-          ) : (
-            <button type="button" className="link-btn" onClick={props.onSettings}>
-              在设置里填上模型 Key，可以让 AI 再筛一遍
+          {props.sources.length > 0 && (
+            <button
+              type="button"
+              className={`icon-btn${scanning ? ' spin' : ''}`}
+              title={
+                props.canRescan
+                  ? `扫描新对话 · 已扫描 ${scanned} 个对话${lastScan ? ` · 上次 ${formatAgo(lastScan)} ${formatListTime(lastScan)}` : ''}`
+                  : `已扫描 ${scanned} 个对话 · 这个浏览器记不住文件夹授权，点这里重新选择`
+              }
+              aria-label="扫描新对话"
+              disabled={!!scanning}
+              onClick={props.onRescan}
+            >
+              <RefreshIcon />
             </button>
           )}
         </div>
+        {scanning && (
+          <div className="scan-line">
+            <span>
+              正在读取 {scanning.done}/{scanning.total} 个文件
+            </span>
+            <div className="progress" aria-hidden="true">
+              <i style={{ width: `${scanning.total ? (scanning.done / scanning.total) * 100 : 0}%` }} />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="chips-row" role="group" aria-label="按类型筛选">
@@ -133,11 +85,10 @@ export function DiscoverList(props: Props) {
           {candidates.length === 0 ? (
             <>
               <b>还没有候选</b>
-              <span>
-                点右上角的「管理记录来源」，添加 Codex、Claude Code 的记录，
-                <br />
-                或者网页版导出的 conversations.json。
-              </span>
+              <span>PromptBox 会从你和 AI 的对话里，找出反复用到的提示词和规则。</span>
+              <button type="button" className="btn sm" onClick={props.onSources}>
+                添加记录来源
+              </button>
             </>
           ) : (
             <>
@@ -162,32 +113,22 @@ export function DiscoverList(props: Props) {
                 <span>{candidate.title}</span>
                 {candidate.origin === 'agent' && <i className="origin">Agent</i>}
                 {candidate.origin === 'ai' && <i className="origin">AI</i>}
+                <AdviceTag advice={props.advice[candidate.id]} />
+                <small className="time">{formatAgo(candidate.lastAt)}</small>
               </div>
-              {candidate.kind === 'prompt' && <div className="item-snip">{candidate.template.replace(/\s+/g, ' ')}</div>}
-              <div className="item-foot">
-                <span>
-                  {candidate.count} 次 · {toolList(candidate.tools)}
-                </span>
-                <span className="time">{formatAgo(candidate.lastAt)}</span>
-              </div>
-              {candidate.similarItemTitle && <span className="similar">和库里的「{candidate.similarItemTitle}」相似，保存时会合并</span>}
+              {/* 提示词和规则都显示一行正文，每张卡片一样高 */}
+              <div className="item-snip">{candidate.template.replace(/\s+/g, ' ') || '\u00a0'}</div>
             </button>
           ))}
         </div>
       )}
-      {(saved > 0 || ignored > 0) && (
-        <p className="done-note">
-          已处理：保存 {saved} 条{ignored ? `，忽略 ${ignored} 条` : ''}
-        </p>
-      )}
-      {props.hiddenCount > 0 && (
-        <p className="done-note">
-          AI 判断 {props.hiddenCount} 条是一次性的，{props.showHidden ? '现在显示着' : '已收起'} ·{' '}
-          <button type="button" className="link-btn" onClick={props.onToggleHidden}>
-            {props.showHidden ? '收起' : '显示'}
-          </button>
-        </p>
-      )}
     </section>
   );
+}
+
+/** 列表里一眼看出 AI 怎么说的；已经处理过 AI 意见的不再标。 */
+function AdviceTag({ advice }: { advice?: Advice }) {
+  if (!advice || advice.status) return null;
+  const text = advice.verdict === 'keep' ? 'AI 建议保留' : advice.verdict === 'skip' ? 'AI：一次性的' : `AI：和「${advice.ofTitle}」重复`;
+  return <i className={`ai-tag ${advice.verdict}`}>{text}</i>;
 }

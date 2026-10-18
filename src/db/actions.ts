@@ -3,7 +3,6 @@
 import { db, getSettings, updateSettings } from './db';
 import { annotateCandidate, buildCandidates } from '../logic/discover/candidates';
 import { coveredLocals } from '../logic/discover/external';
-import type { RefineOutcome } from '../logic/refine';
 import { extractUtterances } from '../logic/discover/classify';
 import { makeBackup, type ImportEntry } from '../logic/importers';
 import { itemFromCandidate, newItem } from '../logic/items';
@@ -11,7 +10,7 @@ import { itemScope, readScope, sameScope, scopeKey } from '../logic/scope';
 import { sampleConversations } from '../samples/conversations';
 import { sampleItems, sampleVersions } from '../samples/library';
 import type { ScanResult } from '../scan/protocol';
-import type { Candidate, Decision, Evidence, Item, ItemRef, ItemType, ScopeFields, SourceId, SourceRecord, Tool, Version } from '../types';
+import type { Advice, Candidate, Decision, Evidence, Item, ItemRef, ItemType, ScopeFields, SourceId, SourceRecord, Tool, Version } from '../types';
 
 export const UNDO_MS = 6000;
 const MAX_EVIDENCE_QUOTES = 20;
@@ -28,18 +27,23 @@ async function markChanged(): Promise<void> {
 
 let seeding: Promise<void> | null = null;
 
+/** 打包桌面版时关掉示例（VITE_SAMPLES=off），打开就是空的。 */
+const WITH_SAMPLES = import.meta.env.VITE_SAMPLES !== 'off';
+
 /** 首次打开写入示例库和示例对话；重复调用只执行一次。 */
 export function seedIfNeeded(): Promise<void> {
   seeding ??= (async () => {
     const now = Date.now();
     const seededNow = await db.transaction('rw', [db.items, db.utterances, db.versions, db.kv], async () => {
       if ((await getSettings()).seeded) return false;
-      const items = sampleItems(now);
-      await db.items.bulkPut(items);
-      await db.versions.bulkPut(sampleVersions(items, now));
-      await db.utterances.bulkPut(sampleConversations(now).flatMap((conversation) => extractUtterances(conversation, true)));
+      if (WITH_SAMPLES) {
+        const items = sampleItems(now);
+        await db.items.bulkPut(items);
+        await db.versions.bulkPut(sampleVersions(items, now));
+        await db.utterances.bulkPut(sampleConversations(now).flatMap((conversation) => extractUtterances(conversation, true)));
+      }
       await updateSettings({ seeded: true });
-      return true;
+      return WITH_SAMPLES;
     });
     if (seededNow) await rebuildCandidates();
     await purgeDeleted();
@@ -162,18 +166,26 @@ export async function restoreCandidate(candidate: Candidate): Promise<void> {
 }
 
 /** AI 提炼判断为一次性的本地候选：编号 → 理由。 */
-export async function getAiSkipped(): Promise<Record<string, string>> {
-  const row = await db.kv.get('aiSkipped');
-  return (row?.value as Record<string, string> | undefined) ?? {};
+// ---------- AI 的意见 ----------
+
+/** AI 对各条本地候选的意见。以前「判断为一次性的」单独存在 aiSkipped 里，读的时候一起算上。 */
+export async function getAdvice(): Promise<Record<string, Advice>> {
+  const [advice, skipped] = await Promise.all([db.kv.get('aiAdvice'), db.kv.get('aiSkipped')]);
+  const legacy = Object.entries((skipped?.value ?? {}) as Record<string, string>).map(([id, reason]): [string, Advice] => [id, { verdict: 'skip', reason, at: 0 }]);
+  return { ...Object.fromEntries(legacy), ...((advice?.value ?? {}) as Record<string, Advice>) };
 }
 
-/** 保存一批 AI 提炼的结果，返回新进「发现」的候选条数。 */
-export async function applyRefine(outcome: RefineOutcome): Promise<number> {
-  const fresh = await addExternalCandidates(outcome.candidates);
+export async function saveAdvice(patch: Record<string, Advice>): Promise<void> {
   await db.transaction('rw', db.kv, async () => {
-    await db.kv.put({ key: 'aiSkipped', value: { ...(await getAiSkipped()), ...outcome.skipped } });
+    const row = await db.kv.get('aiAdvice');
+    await db.kv.put({ key: 'aiAdvice', value: { ...((row?.value ?? {}) as Record<string, Advice>), ...patch } });
   });
-  return fresh;
+}
+
+/** 记下怎么处理 AI 的意见：用了 AI 的版本、保持原样；传空表示撤回，意见重新摊开。 */
+export async function setAdviceStatus(id: string, status?: Advice['status']): Promise<void> {
+  const advice = (await getAdvice())[id];
+  if (advice) await saveAdvice({ [id]: { ...advice, status } });
 }
 
 // ---------- 记录来源和扫描 ----------
@@ -272,9 +284,7 @@ async function removeItems(match: (item: Item) => boolean): Promise<number> {
 }
 
 export async function clearSamples(): Promise<number> {
-  const count = await removeItems((item) => item.isSample);
-  await updateSettings({ bannerDismissed: true });
-  return count;
+  return removeItems((item) => item.isSample);
 }
 
 // ---------- 版本历史 ----------
@@ -321,10 +331,6 @@ export async function restoreVersion(itemId: string, version: Version): Promise<
     await markChanged();
     return number;
   });
-}
-
-export async function dismissBanner(): Promise<void> {
-  await updateSettings({ bannerDismissed: true });
 }
 
 export async function saveGenerated(fields: ScopeFields & { title: string; content: string; need: string; refs: ItemRef[] }): Promise<string> {

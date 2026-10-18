@@ -1,38 +1,49 @@
-// AI 提炼：先说清楚会发送什么，确认后分批发给模型，结果进「发现」，每批完成就保存，中途出错也不白跑。
+// 一次让 AI 看完全部候选：先列出要发哪几条，确认后分批发给模型；每批的意见挂到各自的候选下面，
+// 做完逐条交代结果。每批完成就保存，中途出错也不白跑。用不用 AI 的意见，还是在「发现」里一条条决定。
 
 import { useEffect, useRef, useState } from 'react';
-import { chat } from '../logic/llm';
+import { chat, withTimeout } from '../logic/llm';
 import { BATCH_SIZE, REFINE_SYSTEM, groupsPayload, parseRefineResponse, quoteCount, type RefineGroup, type RefineOutcome } from '../logic/refine';
-import type { LlmSettings } from '../types';
+import type { Advice, LlmSettings } from '../types';
 import { Dialog } from './Dialog';
 
 interface Props {
   groups: RefineGroup[];
-  llm: LlmSettings;
+  /** 还没填好模型时为空，弹窗只说明要先去设置里填 Key。 */
+  llm?: LlmSettings;
   providerName: string;
-  /** 保存一批结果，返回新进「发现」的候选条数。 */
-  onBatch: (outcome: RefineOutcome) => Promise<number>;
+  onSettings: () => void;
+  /** 保存一批的意见，返回这一批每条候选得到的意见。 */
+  onBatch: (outcome: RefineOutcome, batch: RefineGroup[]) => Promise<Record<string, Advice>>;
   onClose: () => void;
 }
 
 type Phase =
   | { name: 'confirm' }
   | { name: 'running'; done: number; total: number }
-  | { name: 'done'; fresh: number; skipped: number }
-  | { name: 'error'; message: string; fresh: number; done: number; total: number };
+  | { name: 'done' }
+  | { name: 'error'; message: string; done: number; total: number };
 
-export function RefineDialog({ groups, llm, providerName, onBatch, onClose }: Props) {
+/** 结果列表里每条的一句话。 */
+export function adviceSummary(advice: Advice | undefined): string {
+  if (!advice) return 'AI 没给结论，可以在这条候选里单独再问';
+  if (advice.verdict === 'keep') return `建议保留，名称「${advice.title}」`;
+  if (advice.verdict === 'skip') return `一次性：${advice.reason}`;
+  return `和「${advice.ofTitle}」是同一件事`;
+}
+
+export function RefineDialog({ groups, llm, providerName, onBatch, onSettings, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>({ name: 'confirm' });
+  const [results, setResults] = useState<Record<string, Advice>>({});
   const controller = useRef<AbortController | null>(null);
   const batches = Array.from({ length: Math.ceil(groups.length / BATCH_SIZE) }, (_, index) => groups.slice(index * BATCH_SIZE, (index + 1) * BATCH_SIZE));
 
   useEffect(() => () => controller.current?.abort(), []);
 
   const start = async () => {
+    if (!llm) return;
     const current = new AbortController();
     controller.current = current;
-    let fresh = 0;
-    let skipped = 0;
     for (let index = 0; index < batches.length; index++) {
       setPhase({ name: 'running', done: index, total: batches.length });
       try {
@@ -42,69 +53,81 @@ export function RefineDialog({ groups, llm, providerName, onBatch, onClose }: Pr
             { role: 'system', content: REFINE_SYSTEM },
             { role: 'user', content: groupsPayload(batches[index]) },
           ],
-          current.signal,
+          withTimeout(current.signal, 180_000),
         );
-        const outcome = parseRefineResponse(answer, batches[index]);
-        fresh += await onBatch(outcome);
-        skipped += Object.keys(outcome.skipped).length;
+        const advice = await onBatch(parseRefineResponse(answer, batches[index]), batches[index]);
+        if (current.signal.aborted) return;
+        setResults((before) => ({ ...before, ...advice }));
       } catch (error) {
         if (current.signal.aborted) return;
-        setPhase({ name: 'error', message: error instanceof Error ? error.message : String(error), fresh, done: index, total: batches.length });
+        setPhase({ name: 'error', message: error instanceof Error ? error.message : String(error), done: index, total: batches.length });
         return;
       }
     }
-    setPhase({ name: 'done', fresh, skipped });
+    setPhase({ name: 'done' });
   };
 
-  const footer =
-    phase.name === 'confirm' ? (
-      <button type="button" className="btn primary" disabled={!groups.length} onClick={() => void start()}>
-        开始提炼
-      </button>
-    ) : phase.name === 'running' ? (
-      <span className="hint muted">关闭窗口会停止提炼，已完成的批次会保留</span>
-    ) : (
-      <button type="button" className="btn primary" onClick={onClose}>
-        去看结果
-      </button>
-    );
+  const answered = groups.filter((group) => results[group.id]);
+  const footer = !llm ? (
+    <button type="button" className="btn primary" onClick={onSettings}>
+      去设置
+    </button>
+  ) : phase.name === 'confirm' ? (
+    <button type="button" className="btn primary" disabled={!groups.length} onClick={() => void start()}>
+      开始
+    </button>
+  ) : phase.name === 'running' ? (
+    <span className="hint muted">关闭窗口会停下，已经问完的批次会保留</span>
+  ) : (
+    <button type="button" className="btn primary" onClick={onClose}>
+      去「发现」逐条看
+    </button>
+  );
 
   return (
-    <Dialog title="AI 提炼" sub="让模型按提炼标准再筛一遍" size="narrow" onClose={onClose} footer={footer}>
-      {phase.name === 'confirm' &&
-        (groups.length ? (
-          <div className="stack">
-            <p>
-              会把 <b>{groups.length} 组</b>、共 <b>{quoteCount(groups)} 句原话</b>（每句最多 200 字）分 {batches.length} 批发给 {providerName}（{llm.model}），请它判断哪些值得长期保存，起好名字，写成模板或规则。
-            </p>
-            <p className="note-line">只发送这些分好组的原话，不发送完整的聊天记录。判断标准和本地 Agent 用的提炼 Skill 是同一份：大多数对话是一次性的，宁缺毋滥。</p>
-            <p className="hint">模型判断为一次性的组会收起来，在「发现」底部可以展开再看。</p>
-          </div>
-        ) : (
-          <p className="note-line">没有需要提炼的内容：本地候选都已经处理或提炼过了。</p>
-        ))}
+    <Dialog title="让 AI 看完全部候选" size="narrow" onClose={onClose} footer={footer} dismissable={phase.name !== 'running'}>
+      {!llm && <p className="note-line">要先在「设置 → AI 模型」里选一个模型服务、填好 Key。</p>}
+      {llm && phase.name === 'confirm' && !groups.length && <p className="note-line">「发现」里的候选都问过 AI 了。</p>}
+      {llm && phase.name === 'confirm' && groups.length > 0 && (
+        <div className="stack">
+          <p>
+            会把下面 <b>{groups.length} 条</b>候选的 <b>{quoteCount(groups)} 句原话</b>发给 {providerName}（{llm.model}）。AI 的意见会挂在每条候选下面，用不用由你一条条决定。
+          </p>
+          <ul className="refine-list">
+            {groups.map((group) => (
+              <li key={group.id}>
+                <span>{group.title}</span>
+                <small>{group.quotes.length} 句</small>
+              </li>
+            ))}
+          </ul>
+          <p className="hint">只发这些原话，每句最多 200 字，不发完整的聊天记录。</p>
+        </div>
+      )}
       {phase.name === 'running' && (
         <div className="stack">
           <p>
-            正在提炼第 {phase.done + 1}/{phase.total} 批……
+            正在问第 {phase.done + 1}/{phase.total} 批……
           </p>
           <div className="progress" aria-hidden="true">
             <i style={{ width: `${(phase.done / phase.total) * 100}%` }} />
           </div>
         </div>
       )}
-      {phase.name === 'done' && (
-        <p>
-          提炼完了：{phase.fresh} 条新候选进了「发现」，{phase.skipped} 组判断为一次性的，已收起。
+      {phase.name === 'error' && (
+        <p className="error-line">
+          {phase.message} 已问完 {phase.done}/{phase.total} 批，问完的意见已经保存；没问到的，之后可以再来一次，或者在候选里单独问。
         </p>
       )}
-      {phase.name === 'error' && (
-        <div className="stack">
-          <p className="error-line">{phase.message}</p>
-          <p className="hint">
-            已完成 {phase.done}/{phase.total} 批，{phase.fresh} 条新候选已经进了「发现」。可以稍后再点「AI 提炼」继续，已提炼过的不会重复发送。
-          </p>
-        </div>
+      {(phase.name === 'done' || (phase.name === 'error' && answered.length > 0)) && (
+        <ul className="refine-list results">
+          {(phase.name === 'done' ? groups : answered).map((group) => (
+            <li key={group.id} className={results[group.id]?.verdict ?? 'none'}>
+              <span>{group.title}</span>
+              <small>{adviceSummary(results[group.id])}</small>
+            </li>
+          ))}
+        </ul>
       )}
     </Dialog>
   );

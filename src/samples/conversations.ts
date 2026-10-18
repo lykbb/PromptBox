@@ -57,8 +57,3 @@ export function sampleConversations(now = Date.now()): Conversation[] {
   });
 }
 
-/** 示例里每个工具各有多少段对话，发现页顶部显示用。 */
-export const SAMPLE_TOOL_COUNTS: Partial<Record<Tool, number>> = SPECS.reduce<Partial<Record<Tool, number>>>((counts, [tool]) => {
-  counts[tool] = (counts[tool] ?? 0) + 1;
-  return counts;
-}, {});

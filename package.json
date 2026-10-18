@@ -10,6 +10,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "package:mac": "bash scripts/package-mac.sh",
     "test": "vitest run"
   },
   "dependencies": {

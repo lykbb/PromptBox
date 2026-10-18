@@ -89,7 +89,13 @@ export function GenerateDialog({ need: initialNeed, items, llm, onCopy, onSave, 
   );
 
   return (
-    <Dialog title="按我的风格写提示词" size="wide" onClose={onClose} footer={footer}>
+    <Dialog
+      title="按我的风格写提示词"
+      size="wide"
+      onClose={onClose}
+      footer={footer}
+      dismissable={run.state !== 'loading' && run.state !== 'done' && !pasted.text.trim()}
+    >
       <input className="ask" value={need} aria-label="需求" placeholder="一句话说清你想让 AI 做什么" onChange={(event) => setNeed(event.target.value)} />
       <ScopeEditor value={scope} onChange={setScope} allowUnconfirmed={false} />
       <p className="hint">所有任务都适用的规则每次都会参考；选了项目或任务，会再带上这个范围的规则，名称要和库里写的一致。</p>
@@ -123,7 +129,7 @@ export function GenerateDialog({ need: initialNeed, items, llm, onCopy, onSave, 
             <div className="sec-label">生成结果</div>
             {run.state === 'idle' && <p className="hint">确认左侧参考内容后，点击「生成」。</p>}
             {run.state === 'loading' && <div className="box loading">正在生成……</div>}
-            {run.state === 'error' && <p className="error-line">{run.message}</p>}
+            {run.state === 'error' && <p className="error-line">{run.message} 也可以点「复制生成指令」，贴到常用的 AI 里生成。</p>}
             {run.state === 'done' && (
               <div className="box preview">
                 <pre>

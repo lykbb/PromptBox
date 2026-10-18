@@ -18,10 +18,6 @@ interface Props {
   onNew: () => void;
   onGenerate: () => void;
   relatedCount: number;
-  showBanner: boolean;
-  sampleCount: number;
-  onClearSamples: () => void;
-  onDismissBanner: () => void;
   emptyLibrary: boolean;
   showRulesExport: boolean;
   onExportRules: () => void;
@@ -57,7 +53,7 @@ export function LibraryList(props: Props) {
     }
   };
 
-  const meta = hits ? (hits.length ? `找到 ${hits.length} 条相关` : '没有找到相关内容') : `${items.length} 条 · 按最近修改`;
+  const meta = hits ? (hits.length ? `找到 ${hits.length} 条相关` : '没有找到相关内容') : `${items.length} 条`;
 
   return (
     <section className="list" aria-label="库">
@@ -79,26 +75,12 @@ export function LibraryList(props: Props) {
         <button type="button" className="gen-row" onClick={props.onGenerate}>
           <span>
             <b>按我的风格生成一条</b>
-            <small>{props.relatedCount ? `参考库里 ${props.relatedCount} 条相关内容和你的规则` : '参考你的规则'}</small>
+            <small>{props.relatedCount ? `参考 ${props.relatedCount} 条相关内容` : '参考你的规则'}</small>
           </span>
           <span className="go" aria-hidden="true">
             →
           </span>
         </button>
-      )}
-
-      {props.showBanner && (
-        <div className="banner">
-          内容保存在当前浏览器；使用模型生成时会发送所选参考内容。下面 {props.sampleCount} 条是示例。
-          <div className="row">
-            <button type="button" className="btn sm" onClick={props.onClearSamples}>
-              清除示例
-            </button>
-            <button type="button" className="btn sm ghost" onClick={props.onDismissBanner}>
-              知道了
-            </button>
-          </div>
-        </div>
       )}
 
       <div className="list-meta">
@@ -113,17 +95,11 @@ export function LibraryList(props: Props) {
       {props.emptyLibrary ? (
         <div className="empty">
           <b>库里还没有内容</b>
-          <span>
-            去侧栏「发现」，从你的对话里找；
-            <br />
-            或者点上方「新建」写一条，
-            <br />
-            也可以把 .md 文件、备份文件拖进窗口。
-          </span>
+          <span>去「发现」从对话里找，或者点「新建」写一条</span>
         </div>
       ) : visible.length === 0 ? (
         <div className="empty">
-          {hits ? <span>没有找到相关内容，可以点「按我的风格生成」写一条新的。</span> : <span>这里还没有内容</span>}
+          <span>{hits ? '没有找到相关内容' : '这里还没有内容'}</span>
         </div>
       ) : (
         <div ref={listRef} className="items" role="listbox" aria-label="内容列表" tabIndex={0} onKeyDown={onKeyDown}>
@@ -140,16 +116,10 @@ export function LibraryList(props: Props) {
               <div className="item-title">
                 <TypeIcon type={item.type} />
                 <span>{item.title || '未命名'}</span>
+                <small className="time">{hits ? (hits[index].level === 'high' ? '高度相关' : '相关') : formatListTime(item.updatedAt)}</small>
               </div>
-              {snippet(item) && <div className="item-snip">{snippet(item)}</div>}
-              <div className="item-foot">
-                {item.tags.slice(0, 3).map((tag) => (
-                  <span key={tag} className="tag">
-                    {tag}
-                  </span>
-                ))}
-                <span className="time">{hits ? (hits[index].level === 'high' ? '高度相关' : '相关') : formatListTime(item.updatedAt)}</span>
-              </div>
+              {/* 每张卡片都是两行，正文空着也占一行，高度一致 */}
+              <div className="item-snip">{snippet(item) || '\u00a0'}</div>
             </button>
           ))}
         </div>

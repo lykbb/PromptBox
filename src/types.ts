@@ -1,5 +1,7 @@
 // 全站共用的数据类型。界面、存储和逻辑层都从这里取。
 
+import type { Palette, Theme } from './theme';
+
 export type ItemType = 'prompt' | 'rule';
 
 /** 记录来自哪个 AI 工具。后面几种只会出现在本地 Agent 提炼的候选里。 */
@@ -197,7 +199,25 @@ export interface ScannedFile {
 }
 
 /** 兼容 OpenAI 接口的服务商。 */
-export type LlmProvider = 'openai' | 'deepseek' | 'dashscope' | 'zhipu' | 'custom';
+export type LlmProvider =
+  | 'deepseek'
+  | 'dashscope'
+  | 'zhipu'
+  | 'moonshot'
+  | 'volcengine'
+  | 'siliconflow'
+  | 'minimax'
+  | 'qianfan'
+  | 'stepfun'
+  | 'modelscope'
+  | 'openai'
+  | 'anthropic'
+  | 'gemini'
+  | 'xai'
+  | 'mistral'
+  | 'groq'
+  | 'openrouter'
+  | 'custom';
 
 export interface LlmSettings {
   provider: LlmProvider;
@@ -205,13 +225,51 @@ export interface LlmSettings {
   model: string;
   /** 选"其他"时填的服务地址，比如 https://example.com/v1。 */
   baseUrl?: string;
+  /** 自己添加的接口是哪一个，对应 Settings.llmCustom 里的 id。 */
+  customId?: string;
+}
+
+/** AI 对一条本地候选的意见：值得留（附上建议的名称和写法）、一次性的、或者和另一条是同一件事。 */
+export type Advice = (
+  | ({ verdict: 'keep'; title: string; content: string; kind: ItemType; tags: string[]; reason: string; confidence: 'high' | 'medium' } & ScopeFields)
+  | { verdict: 'skip'; reason: string }
+  | { verdict: 'duplicate'; of: string; ofTitle: string }
+) & {
+  at: number;
+  /** 用户怎么处理的：用了 AI 的版本，或者保持原样。没处理时为空。 */
+  status?: 'applied' | 'kept';
+};
+
+/** 用过的一个模型：哪家服务加上模型名。Key 和地址存在服务那边，这里只记引用。 */
+export interface SavedModel {
+  provider: LlmProvider;
+  /** 自己添加的接口是哪一个。 */
+  customId?: string;
+  model: string;
+}
+
+/** 自己添加过的兼容 OpenAI 接口，添加一次以后直接选。 */
+export interface CustomService {
+  id: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
 }
 
 export interface Settings {
   seeded: boolean;
-  bannerDismissed: boolean;
   lastBackupAt?: number;
   /** 上次备份之后库里有没有改动。 */
   changedSinceBackup: boolean;
   llm?: LlmSettings;
+  /** 每家预设服务商各自填过的 Key 和模型，切换服务商时恢复。 */
+  llmSaved?: Partial<Record<LlmProvider, Omit<LlmSettings, 'provider'>>>;
+  /** 自己添加过的接口。 */
+  llmCustom?: CustomService[];
+  /** 用过的模型，设置里列出来，点一下切换。 */
+  llmModels?: SavedModel[];
+  /** 主题色，没选过是黑白灰。 */
+  palette?: Palette;
+  /** 外观主题，没选过就跟着系统。 */
+  theme?: Theme;
 }

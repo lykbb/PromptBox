@@ -81,7 +81,7 @@ function readBackup(fileName: string, text: string, now: number): ImportEntry {
   }
   const first = Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) : undefined;
   if (first && (first.mapping || Array.isArray(first.chat_messages))) {
-    return { kind: 'unsupported', fileName, label: '这是聊天记录导出，请在「发现」的「管理记录来源」里添加' };
+    return { kind: 'unsupported', fileName, label: '像是聊天记录导出，但认不出是 ChatGPT 还是 Claude 的' };
   }
   const backup = data as Partial<BackupFile>;
   if (!backup || backup.app !== 'promptbox' || !Array.isArray(backup.items)) {
@@ -121,6 +121,7 @@ function isDecisionLike(value: unknown): value is Decision {
 export function readImportFile(fileName: string, text: string, now = Date.now()): ImportEntry {
   const lower = fileName.toLowerCase();
   if (lower.endsWith('.json')) return readBackup(fileName, text, now);
+  if (lower.endsWith('.zip')) return { kind: 'unsupported', fileName, label: '压缩包里没有 ChatGPT 或 Claude 的聊天记录' };
   if (!/\.(md|markdown|txt)$/.test(lower)) return { kind: 'unsupported', fileName, label: '不支持' };
 
   const { data, body } = parseFrontmatter(text);

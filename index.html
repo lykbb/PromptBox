@@ -3,10 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="description" content="从你和 AI 的对话里提炼提示词和规则，再按你的风格写新的。数据只在你的浏览器里。" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>PromptBox</title>
+    <script>
+      // 在页面画出来之前套上主题，深色模式下不会先闪一下白。和 src/theme.ts 用同样的键。
+      try {
+        var theme = localStorage.getItem('promptbox-theme') || 'system';
+        if (theme === 'system') theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.palette = localStorage.getItem('promptbox-palette') || 'mono';
+      } catch (error) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

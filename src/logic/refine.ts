@@ -1,14 +1,18 @@
-// AI 提炼：把本地分好的组交给模型，按 Skill 里同一份提炼标准（rubric.md）再筛一遍。
-// 只发送每组的几句原话（每句最多 200 字），不发送完整聊天记录。
+// AI 提炼：把本地找到的候选交给模型，按 Skill 里同一份提炼标准（rubric.md）再筛一遍。
+// 可以一条一条问，也可以一次问完；模型的判断变成挂在各条候选下面的「意见」，用不用由用户一条条决定，不会凭空多出候选。
+// 只发送每条候选的几句原话（每句最多 200 字），不发送完整聊天记录。
 
 import RUBRIC from '../../skills/promptbox-extract/references/rubric.md?raw';
-import type { Candidate, Quote, Tool, Utterance } from '../types';
+import type { Advice, Candidate, Quote, Tool } from '../types';
 import { toCandidate } from './discover/external';
-import { bigrams, clip, dice } from './text';
+import { clip } from './text';
 
 export interface RefineGroup {
+  /** 就是本地候选的 id。 */
   id: string;
-  kind: 'task' | 'correction' | 'standing';
+  /** 本地候选的名称，只在界面上显示，不发给模型。 */
+  title?: string;
+  kind: 'task' | 'correction';
   count: number;
   conversations: number;
   days: number;
@@ -21,53 +25,26 @@ export const MAX_GROUPS = 60;
 export const BATCH_SIZE = 15;
 const QUOTE_CHARS = 200;
 
-const STANDING = /(以后|今后|往后|每次|一直|始终|永远|默认|记住|记得|都这样|不要再|别再|from now on|always|never|remember)/i;
-const INSTRUCTION = /(用|说|写|回答|回复|不要|别|先|保持|统一|控制|加上|分成|改成|换成|格式|中文|英文|简洁|结论)/;
-const TROUBLE = /(报错|错误|失败|出错|崩溃|卡住|不行|没反应|bug|error|fail)/i;
-
-/** 明确要求长期遵守的话：有"以后""每次""记住"这类词，又像在提要求，而且不是在报问题。 */
-export function isStanding(text: string): boolean {
-  return Array.from(text).length <= 200 && STANDING.test(text) && INSTRUCTION.test(text) && !TROUBLE.test(text);
-}
-
 function dayCount(times: number[]): number {
   return new Set(times.map((time) => new Date(time).toDateString())).size;
 }
 
-/** 交给模型的组：还没处理的本地候选，加上明确说过"以后都这样"的话（出现一次也算）。次数多的优先，最多 60 组。 */
-export function buildRefineGroups(candidates: Candidate[], utterances: Utterance[]): RefineGroup[] {
-  const groups: RefineGroup[] = candidates.map((candidate) => ({
-    id: candidate.id,
-    kind: candidate.kind === 'prompt' ? 'task' : 'correction',
-    count: candidate.count,
-    conversations: candidate.sessions,
-    days: candidate.days ?? dayCount(candidate.quotes.map((quote) => quote.at)),
-    tools: candidate.tools,
-    localTemplate: candidate.template,
-    quotes: candidate.quotes.slice(0, 6),
-  }));
-
-  const standing: { grams: Set<string>; members: Utterance[] }[] = [];
-  for (const utterance of utterances) {
-    if (!isStanding(utterance.text)) continue;
-    const grams = bigrams(utterance.text);
-    const twin = standing.find((entry) => dice(entry.grams, grams) >= 0.7);
-    if (twin) twin.members.push(utterance);
-    else standing.push({ grams, members: [utterance] });
-  }
-  standing.forEach((entry, index) => {
-    const members = [...entry.members].sort((a, b) => b.at - a.at);
-    groups.push({
-      id: `standing-${index + 1}`,
-      kind: 'standing',
-      count: members.length,
-      conversations: new Set(members.map((member) => member.session)).size,
-      days: dayCount(members.map((member) => member.at)),
-      tools: [...new Set(members.map((member) => member.tool))],
-      quotes: members.slice(0, 4).map((member) => ({ tool: member.tool, at: member.at, text: member.text })),
-    });
-  });
-  return groups.sort((a, b) => b.count - a.count).slice(0, MAX_GROUPS);
+/** 交给模型的组：每条本地候选一组。次数多的优先，最多 60 组。 */
+export function buildRefineGroups(candidates: Candidate[]): RefineGroup[] {
+  return candidates
+    .map((candidate) => ({
+      id: candidate.id,
+      title: candidate.title,
+      kind: candidate.kind === 'prompt' ? ('task' as const) : ('correction' as const),
+      count: candidate.count,
+      conversations: candidate.sessions,
+      days: candidate.days ?? dayCount(candidate.quotes.map((quote) => quote.at)),
+      tools: candidate.tools,
+      localTemplate: candidate.template,
+      quotes: candidate.quotes.slice(0, 6),
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, MAX_GROUPS);
 }
 
 /** 要发出去的原话句数，确认时告诉用户。 */
@@ -83,7 +60,7 @@ ${RUBRIC}
 
 输入是本地程序预先分好的组，JSON 数组。每组字段：
 - id：组的编号
-- kind：task 反复交代的任务 / correction 反复做的纠正 / standing 明确说了要长期遵守的话
+- kind：task 反复交代的任务 / correction 反复做的纠正
 - count、conversations、days：出现次数、对话数、天数
 - tools：来自哪些工具
 - localTemplate：本地程序拟的模板或规则，可能不准，只作参考
@@ -174,7 +151,7 @@ export function parseRefineResponse(text: string, groups: RefineGroup[], now = D
         tools: [...new Set(members.flatMap((member) => member.tools))],
         quotes,
         lastSeen: Math.max(...quotes.map((quote) => quote.at)),
-        basedOn: based.filter((id) => !id.startsWith('standing-')),
+        basedOn: based,
       },
       'ai',
       now,
@@ -187,8 +164,34 @@ export function parseRefineResponse(text: string, groups: RefineGroup[], now = D
   const skipped: Record<string, string> = {};
   for (const raw of Array.isArray(data.skipped) ? data.skipped : []) {
     const entry = raw as { id?: unknown; why?: unknown };
-    if (typeof entry?.id !== 'string' || !byId.has(entry.id) || used.has(entry.id) || entry.id.startsWith('standing-')) continue;
+    if (typeof entry?.id !== 'string' || !byId.has(entry.id) || used.has(entry.id)) continue;
     skipped[entry.id] = typeof entry.why === 'string' && entry.why.trim() ? entry.why.trim() : '模型判断为一次性的';
   }
   return { candidates, skipped };
+}
+
+/** 把模型的回答变成每条候选的意见。几组合成一条时，意见挂在第一组上，其余几组标成和它是同一件事。模型没提到的组不给意见。 */
+export function adviceFromOutcome(outcome: RefineOutcome, groups: RefineGroup[], now = Date.now()): Record<string, Advice> {
+  const titleOf = new Map(groups.map((group) => [group.id, group.title ?? '']));
+  const advice: Record<string, Advice> = {};
+  for (const candidate of outcome.candidates) {
+    const [first, ...rest] = (candidate.basedOn ?? []).filter((id) => !advice[id]);
+    if (!first) continue;
+    advice[first] = {
+      verdict: 'keep',
+      title: candidate.title,
+      content: candidate.template,
+      kind: candidate.kind,
+      tags: candidate.tags ?? [],
+      reason: candidate.reason ?? '',
+      confidence: candidate.confidence ?? 'medium',
+      scope: candidate.scope,
+      project: candidate.project,
+      taskType: candidate.taskType,
+      at: now,
+    };
+    for (const id of rest) advice[id] = { verdict: 'duplicate', of: first, ofTitle: titleOf.get(first) || candidate.title, at: now };
+  }
+  for (const [id, reason] of Object.entries(outcome.skipped)) if (!advice[id]) advice[id] = { verdict: 'skip', reason, at: now };
+  return advice;
 }

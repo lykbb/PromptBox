@@ -51,7 +51,7 @@ db.version(3)
       }),
   );
 
-const DEFAULT_SETTINGS: Settings = { seeded: false, bannerDismissed: false, changedSinceBackup: false };
+const DEFAULT_SETTINGS: Settings = { seeded: false, changedSinceBackup: false };
 
 export async function getSettings(): Promise<Settings> {
   const row = await db.kv.get('settings');

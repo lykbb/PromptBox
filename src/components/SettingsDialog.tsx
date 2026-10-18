@@ -1,158 +1,215 @@
-// 设置：AI 模型（可选）和备份。改了就保存，没有保存按钮。
+// 设置：左边分类，右边内容。弹窗大小固定，切换分类时不跳。改了就保存，没有保存按钮。
 
-import { useEffect, useId, useState } from 'react';
+import { useState, type KeyboardEvent, type ReactNode } from 'react';
+import { version } from '../../package.json';
+import { REPO_URL } from '../config';
 import { updateSettings } from '../db/db';
-import { complete, isConfigured, listModels, PROVIDERS, providerOf } from '../logic/llm';
 import { formatAgo } from '../logic/time';
-import type { LlmProvider, LlmSettings, Settings } from '../types';
+import { PALETTES, type Palette, type Theme } from '../theme';
+import type { Settings } from '../types';
 import { Dialog } from './Dialog';
+import { DataIcon, DownloadIcon, FolderIcon, InfoIcon, SparkIcon, TerminalIcon, ThemeIcon, TrashIcon } from './Icons';
+import { ModelSettings } from './ModelSettings';
+import { AgentPanel, SourcesPanel, type SourcesPanelProps } from './SourcesPanel';
+
+export type SettingsTab = 'sources' | 'model' | 'agent' | 'appearance' | 'data' | 'about';
 
 interface Props {
   settings: Settings;
+  /** 打开时显示哪一页。 */
+  tab: SettingsTab;
+  sources: SourcesPanelProps;
   onBackup: () => void;
+  /** 库里还剩几条示例，0 时不显示清除示例。 */
+  sampleCount: number;
+  onClearSamples: () => void;
+  /** 还没问过 AI 的候选数，「一次让 AI 看完全部候选」用。 */
+  refinePending: number;
+  onRefineAll: () => void;
   onClose: () => void;
 }
 
-const EMPTY: LlmSettings = { provider: 'deepseek', apiKey: '', model: '', baseUrl: '' };
+const TABS: { id: SettingsTab; label: string; icon: ReactNode; desc?: string }[] = [
+  {
+    id: 'sources',
+    label: '记录来源',
+    icon: <FolderIcon />,
+    desc: 'PromptBox 从你和 AI 的对话里找出反复用到的提示词和规则。只在这个浏览器里读取和计算，不上传。',
+  },
+  { id: 'model', label: 'AI 模型', icon: <SparkIcon />, desc: '用于「按我的风格生成」和「AI 提炼」。不填也能用，生成时可以复制指令到你常用的 AI。' },
+  {
+    id: 'agent',
+    label: '本地 Agent',
+    icon: <TerminalIcon />,
+    desc: '让 Codex、Claude Code、WorkBuddy 这类 Agent 读懂意思再提炼，比网页里按字面找更准，还能读更多工具的记录。',
+  },
+  { id: 'appearance', label: '外观', icon: <ThemeIcon /> },
+  { id: 'data', label: '数据', icon: <DataIcon />, desc: '内容只存在这个浏览器里。换浏览器或清除浏览器数据前，先导出备份；恢复时把备份文件拖进「记录来源」。' },
+  { id: 'about', label: '关于', icon: <InfoIcon /> },
+];
 
-export function SettingsDialog({ settings, onBackup, onClose }: Props) {
-  const [llm, setLlm] = useState<LlmSettings>(settings.llm ?? EMPTY);
-  const [models, setModels] = useState<string[]>([]);
-  const [test, setTest] = useState<{ state: 'idle' | 'running' | 'ok' | 'error'; message?: string }>({ state: 'idle' });
-  const listId = useId();
-  const preset = providerOf(llm.provider);
+export function SettingsDialog({ settings, tab: initialTab, sources, onBackup, sampleCount, onClearSamples, refinePending, onRefineAll, onClose }: Props) {
+  const [tab, setTab] = useState(initialTab);
+  const current = TABS.find((item) => item.id === tab) ?? TABS[0];
 
-  const change = (patch: Partial<LlmSettings>) => {
-    const next = { ...llm, ...patch };
-    setLlm(next);
-    setTest({ state: 'idle' });
-    void updateSettings({ llm: next.apiKey.trim() ? next : undefined });
+  // 上下方向键在分类之间移动
+  const onNavKey = (event: KeyboardEvent) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const index = TABS.findIndex((item) => item.id === tab);
+    const next = TABS[(index + (event.key === 'ArrowDown' ? 1 : -1) + TABS.length) % TABS.length];
+    setTab(next.id);
+    document.getElementById(`settings-tab-${next.id}`)?.focus();
   };
-
-  // 填好 Key 后读取可用的模型，读不到就手动填
-  useEffect(() => {
-    setModels([]);
-    if (!llm.apiKey.trim() || (llm.provider === 'custom' && !/^https:\/\//.test(llm.baseUrl ?? ''))) return;
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => void listModels(llm, controller.signal).then(setModels), 600);
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [llm.provider, llm.apiKey, llm.baseUrl]);
-
-  const runTest = async () => {
-    setTest({ state: 'running' });
-    try {
-      await complete(llm, '只回复一个字：好');
-      setTest({ state: 'ok' });
-    } catch (error) {
-      setTest({ state: 'error', message: error instanceof Error ? error.message : String(error) });
-    }
-  };
-
-  const backupText = settings.lastBackupAt
-    ? `上次备份：${formatAgo(settings.lastBackupAt)}${settings.changedSinceBackup ? '，之后有改动' : '，之后没有改动'}。`
-    : '还没有备份过。';
 
   return (
-    <Dialog title="设置" size="narrow" onClose={onClose}>
-      <div className="stack">
-        <div>
-          <div className="sec-label">AI 模型 · 可选</div>
-          <div className="fields">
-            <label htmlFor="llm-provider">服务商</label>
-            <select
-              id="llm-provider"
-              className="input"
-              value={llm.provider}
-              onChange={(event) => change({ provider: event.target.value as LlmProvider, model: '' })}
-            >
-              {PROVIDERS.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}
-                </option>
-              ))}
-            </select>
-            {llm.provider === 'custom' && (
-              <>
-                <label htmlFor="llm-base">接口地址</label>
-                <div>
-                  <input
-                    id="llm-base"
-                    className="input"
-                    value={llm.baseUrl ?? ''}
-                    placeholder="https://…/v1"
-                    onChange={(event) => change({ baseUrl: event.target.value.trim() })}
-                  />
-                  <span className="hint">兼容 OpenAI 接口的地址，后面不用加 /chat/completions</span>
-                </div>
-              </>
-            )}
-            <label htmlFor="llm-key">API Key</label>
-            <input
-              id="llm-key"
-              className="input"
-              type="password"
-              autoComplete="off"
-              value={llm.apiKey}
-              placeholder="sk-…"
-              onChange={(event) => change({ apiKey: event.target.value })}
-            />
-            <label htmlFor="llm-model">模型</label>
-            <div>
-              <input
-                id="llm-model"
-                className="input"
-                list={listId}
-                value={llm.model}
-                placeholder={preset.modelHint}
-                onChange={(event) => change({ model: event.target.value })}
-              />
-              <datalist id={listId}>
-                {models.map((model) => (
-                  <option key={model} value={model} />
-                ))}
-              </datalist>
-              <span className="hint">{models.length ? `读到 ${models.length} 个可用模型，点输入框可以选` : '填好 Key 后会自动读取可用的模型'}</span>
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-            <button type="button" className="btn sm" disabled={!isConfigured(llm) || test.state === 'running'} onClick={runTest}>
-              {test.state === 'running' ? '正在测试…' : '测试一下'}
-            </button>
-            {llm.apiKey && (
-              <button type="button" className="btn sm ghost" onClick={() => change({ apiKey: '', model: '' })}>
-                清除 Key
-              </button>
-            )}
-            {test.state === 'ok' && <span className="hint" style={{ margin: 0 }}>可以用了</span>}
-          </div>
-          {test.state === 'error' && <p className="error-line" style={{ marginTop: 8 }}>{test.message}</p>}
-          <p className="note-line" style={{ marginTop: 10 }}>
-            用于「按我的风格生成」：只发送你的需求和勾选的几条参考内容，不发送聊天记录。Key 只存在这个浏览器里。不填也能用，生成时复制指令到你常用的 AI。
-          </p>
-        </div>
-
-        <div className="box">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <b style={{ fontSize: 13 }}>备份</b>
-              <span className="hint">库里的内容和处理记录（比如忽略过哪些候选），不含扫描时读到的聊天记录</span>
-            </div>
-            <button type="button" className="btn primary" onClick={onBackup}>
-              导出备份文件
-            </button>
-          </div>
-          <p className="hint" style={{ marginTop: 8 }}>
-            {backupText}恢复备份用侧栏「导入」。
-          </p>
-        </div>
-
-        <p style={{ fontSize: 13 }}>
-          <b>数据存在哪：</b>库和扫描记录保存在当前浏览器；使用模型生成时会发送需求和所选参考内容。清除浏览器数据、换浏览器或换电脑时，数据不会跟着走，记得定期备份。
-        </p>
-      </div>
+    <Dialog title="设置" className="settings" onClose={onClose}>
+      <nav className="settings-nav" role="tablist" aria-orientation="vertical" aria-label="设置分类" onKeyDown={onNavKey}>
+        {TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            id={`settings-tab-${item.id}`}
+            className="settings-tab"
+            aria-selected={tab === item.id}
+            aria-controls="settings-pane"
+            tabIndex={tab === item.id ? 0 : -1}
+            onClick={() => setTab(item.id)}
+          >
+            {item.icon}
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      <section id="settings-pane" className="settings-pane" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
+        <h3 className="pane-title">{current.label}</h3>
+        {current.desc && <p className="pane-desc">{current.desc}</p>}
+        {tab === 'sources' && <SourcesPanel {...sources} onOpenAgent={() => setTab('agent')} />}
+        {tab === 'model' && <ModelSettings settings={settings} refinePending={refinePending} onRefineAll={onRefineAll} />}
+        {tab === 'agent' && <AgentPanel {...sources} />}
+        {tab === 'appearance' && <AppearancePanel theme={settings.theme ?? 'system'} palette={settings.palette ?? 'mono'} />}
+        {tab === 'data' && (
+          <DataPanel lastBackupAt={settings.lastBackupAt} sampleCount={sampleCount} onBackup={onBackup} onClearSamples={onClearSamples} />
+        )}
+        {tab === 'about' && <AboutPanel />}
+      </section>
     </Dialog>
+  );
+}
+
+const THEMES: { id: Theme; label: string }[] = [
+  { id: 'system', label: '跟随系统' },
+  { id: 'light', label: '浅色' },
+  { id: 'dark', label: '深色' },
+];
+
+function AppearancePanel({ theme, palette }: { theme: Theme; palette: Palette }) {
+  return (
+    <div className="stack">
+      <div className="sec-label">主题色</div>
+      <div className="palette-opts" role="radiogroup" aria-label="主题色">
+        {PALETTES.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            role="radio"
+            className="theme-opt"
+            aria-checked={palette === option.id}
+            onClick={() => void updateSettings({ palette: option.id })}
+          >
+            {/* 预览带着自己的 data-palette，直接用这套主题色的变量，跟着当前的明暗变 */}
+            <span className="palette-preview" data-palette={option.id} aria-hidden="true">
+              <i />
+              <i>
+                <b />
+                <b />
+                <em />
+              </i>
+            </span>
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <div className="sec-label" style={{ marginTop: 10 }}>
+        明暗
+      </div>
+      <div className="theme-opts" role="radiogroup" aria-label="明暗">
+        {THEMES.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            role="radio"
+            className="theme-opt"
+            aria-checked={theme === option.id}
+            onClick={() => void updateSettings({ theme: option.id })}
+          >
+            <span className={`theme-preview ${option.id}`} aria-hidden="true">
+              <i />
+              <i>
+                <b />
+                <b />
+              </i>
+            </span>
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DataPanel(props: { lastBackupAt?: number; sampleCount: number; onBackup: () => void; onClearSamples: () => void }) {
+  const { lastBackupAt, sampleCount, onBackup, onClearSamples } = props;
+  return (
+    <div className="rows">
+      <button type="button" className="row-btn" onClick={onBackup}>
+        <span>
+          导出备份文件
+          <small>{lastBackupAt ? `上次备份：${formatAgo(lastBackupAt)}` : '还没有备份过'}</small>
+        </span>
+        <DownloadIcon />
+      </button>
+      {sampleCount > 0 && (
+        <button type="button" className="row-btn" onClick={onClearSamples}>
+          <span>
+            清除示例内容
+            <small>库里还有 {sampleCount} 条示例，改过的不算示例，会留下</small>
+          </span>
+          <TrashIcon />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AboutPanel() {
+  return (
+    <div className="stack about">
+      <p>
+        <b className="about-name">PromptBox</b> <span className="muted">v{version}</span>
+      </p>
+      <p>从你和 AI 的对话里提炼提示词和规则，再按你的风格写新的。</p>
+      <ul className="about-list">
+        <li>没有账号和服务器，内容只存在这个浏览器里。</li>
+        <li>聊天记录在浏览器里扫描，不上传。</li>
+        <li>只有用到模型时，才把需要的内容直接发给你选的服务商。</li>
+      </ul>
+      <p className="hint">
+        开源许可 MIT
+        {REPO_URL && (
+          <>
+            {' · '}
+            <a href={REPO_URL} target="_blank" rel="noreferrer">
+              GitHub ↗
+            </a>
+            {' · '}
+            <a href={`${REPO_URL}/issues`} target="_blank" rel="noreferrer">
+              反馈问题 ↗
+            </a>
+          </>
+        )}
+      </p>
+    </div>
   );
 }

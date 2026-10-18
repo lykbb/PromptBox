@@ -9,29 +9,28 @@ import { ExportDialog } from './components/ExportDialog';
 import { GenerateDialog } from './components/GenerateDialog';
 import { HistoryDialog } from './components/HistoryDialog';
 import { RefineDialog } from './components/RefineDialog';
-import { isConfigured, providerOf } from './logic/llm';
-import { buildRefineGroups, type RefineGroup } from './logic/refine';
+import { chat, isConfigured, serviceName, withTimeout } from './logic/llm';
+import { adviceFromOutcome, buildRefineGroups, groupsPayload, parseRefineResponse, REFINE_SYSTEM, type RefineGroup } from './logic/refine';
 import { ImportDialog } from './components/ImportDialog';
 import { ItemDetail } from './components/ItemDetail';
 import { LibraryList } from './components/LibraryList';
-import { SettingsDialog } from './components/SettingsDialog';
+import { SettingsDialog, type SettingsTab } from './components/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
-import { SourcesDialog } from './components/SourcesDialog';
 import { Toast, type ToastState } from './components/Toast';
 import * as actions from './db/actions';
-import { db, getSettings } from './db/db';
+import { db, getSettings, updateSettings } from './db/db';
 import { useLive } from './db/live';
 import { titleFromNeed } from './logic/generate';
 import { readImportFile, type ImportEntry } from './logic/importers';
 import { applyFilter, sortByRecent, tagCounts, type LibraryFilter } from './logic/items';
 import { searchItems } from './logic/search';
-import { DAY_MS } from './logic/time';
 import { extractVariables } from './logic/variables';
-import { SAMPLE_TOOL_COUNTS } from './samples/conversations';
+import { applyTheme } from './theme';
+import { CHAT_EXPORT_NAMES, readChatExport, type ChatExportKind } from './logic/chatExport';
 import type { FolderSourceId, ScanJob } from './scan/protocol';
 import { SKILL_NAME } from './config';
 import { ensureReadPermission, pickFolder, runScan, supportsFolderPicker } from './scan/scan';
-import type { Candidate, Item, ScopeFields, Settings, SourceId, SourceRecord } from './types';
+import type { Advice, Candidate, Item, ScopeFields, Settings, SourceId, SourceRecord } from './types';
 
 type View = 'discover' | 'library';
 
@@ -40,14 +39,22 @@ type DialogState =
   | { kind: 'export'; item: Item }
   | { kind: 'export-rules' }
   | { kind: 'import'; entries: ImportEntry[] }
-  | { kind: 'settings' }
-  | { kind: 'sources' }
+  | { kind: 'settings'; tab: SettingsTab }
   | { kind: 'generate'; need: string }
   | { kind: 'history'; item: Item }
   | { kind: 'refine'; groups: RefineGroup[] }
   | null;
 
-const BACKUP_REMIND_AFTER = 7 * DAY_MS;
+const SIDEBAR_KEY = 'promptbox-sidebar';
+
+/** 侧栏收没收起只是这个浏览器里的习惯，存在 localStorage，读不到就展开。 */
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === 'collapsed';
+  } catch {
+    return false;
+  }
+}
 
 function readView(): View {
   return window.location.hash === '#library' ? 'library' : 'discover';
@@ -68,13 +75,22 @@ export function App() {
   const [candidateId, setCandidateId] = useState<string | null>(null);
   const [kind, setKind] = useState<KindFilter>('all');
   const [dialog, setDialog] = useState<DialogState>(null);
+  const [sideCollapsed, setSideCollapsed] = useState(readSidebarCollapsed);
+  const toggleSide = () => {
+    const next = !sideCollapsed;
+    setSideCollapsed(next);
+    try {
+      localStorage.setItem(SIDEBAR_KEY, next ? 'collapsed' : 'expanded');
+    } catch {
+      // 存不了只是下次打开时回到展开
+    }
+  };
   const [toast, setToast] = useState<ToastState | null>(null);
   const [scanning, setScanning] = useState<{ done: number; total: number } | null>(null);
   const [matched, setMatched] = useState<Partial<Record<SourceId, number>>>({});
   const [compressed, setCompressed] = useState<Partial<Record<SourceId, number>>>({});
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [showHidden, setShowHidden] = useState(false);
 
   useEffect(() => {
     void actions.seedIfNeeded();
@@ -83,8 +99,14 @@ export function App() {
   const allItems = useLive(() => db.items.toArray(), [], [] as Item[]);
   const candidates = useLive(() => db.candidates.toArray(), [], [] as Candidate[]);
   const settings = useLive(getSettings, [], null as Settings | null);
+  const theme = settings?.theme ?? 'system';
+  const palette = settings?.palette ?? 'mono';
+  const settingsLoaded = !!settings;
+  // 现在实际是浅色还是深色，侧栏的开关用
+  const [mode, setMode] = useState<'light' | 'dark'>(() => (document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'));
+  // 设置读出来之后套上主题；页面刚打开时 index.html 已经按上次的选择套过一次
+  useEffect(() => (settingsLoaded ? applyTheme(theme, palette, setMode) : undefined), [settingsLoaded, theme, palette]);
   const sources = useLive(() => db.sources.toArray(), [], [] as SourceRecord[]);
-  const samplesInDiscover = useLive(async () => (await db.utterances.filter((utterance) => !!utterance.isSample).count()) > 0, [], false);
 
   // ---------- 库 ----------
   const items = useMemo(() => sortByRecent(allItems.filter((item) => !item.deletedAt)), [allItems]);
@@ -102,25 +124,38 @@ export function App() {
   }, [view, visible, selectedId]);
 
   // ---------- 发现 ----------
-  // Agent 和 AI 提炼的候选覆盖了的本地候选不再单独显示；AI 判断为一次性的收起来；外部候选排在前面
-  const aiSkipped = useLive(actions.getAiSkipped, [], {} as Record<string, string>);
+  // Agent 提炼的候选覆盖了的本地候选不再单独显示；外部候选排在前面。AI 的意见挂在各条本地候选下面
+  const advice = useLive(actions.getAdvice, [], {} as Record<string, Advice>);
   const covered = useMemo(
     () => new Set(candidates.filter((candidate) => !actions.isLocalCandidate(candidate)).flatMap((candidate) => candidate.basedOn ?? [])),
     [candidates],
   );
-  const hiddenCount = candidates.filter(
-    (candidate) => actions.isLocalCandidate(candidate) && candidate.status === 'new' && !covered.has(candidate.id) && aiSkipped[candidate.id],
-  ).length;
   const sortedCandidates = useMemo(() => {
     const rank = (candidate: Candidate) => (actions.isLocalCandidate(candidate) ? 1 : 0);
     return candidates
-      .filter((candidate) => !(actions.isLocalCandidate(candidate) && (covered.has(candidate.id) || (!showHidden && aiSkipped[candidate.id]))))
+      .filter((candidate) => !(actions.isLocalCandidate(candidate) && covered.has(candidate.id)))
       .sort((a, b) => rank(a) - rank(b) || b.count - a.count || b.lastAt - a.lastAt);
-  }, [candidates, covered, aiSkipped, showHidden]);
-  // 还没让 AI 筛过的本地候选
-  const refinePending = sortedCandidates.filter(
-    (candidate) => actions.isLocalCandidate(candidate) && candidate.status === 'new' && !aiSkipped[candidate.id],
-  );
+  }, [candidates, covered]);
+  // 还没问过 AI 的本地候选，「一次让 AI 看完」用
+  const refinePending = sortedCandidates.filter((candidate) => actions.isLocalCandidate(candidate) && candidate.status === 'new' && !advice[candidate.id]);
+
+  // 单独问 AI 这一条：只发这一条的原话，意见挂在这条下面
+  const askAi = async (candidate: Candidate, signal: AbortSignal) => {
+    const llm = settings?.llm;
+    if (!isConfigured(llm)) return;
+    const groups = buildRefineGroups([candidate]);
+    const answer = await chat(
+      llm,
+      [
+        { role: 'system', content: REFINE_SYSTEM },
+        { role: 'user', content: groupsPayload(groups) },
+      ],
+      withTimeout(signal, 120_000),
+    );
+    const result = adviceFromOutcome(parseRefineResponse(answer, groups), groups);
+    if (!result[candidate.id]) throw new Error('AI 没给出结论，再试一次。');
+    if (!signal.aborted) await actions.saveAdvice(result);
+  };
   const openCandidates = useMemo(
     () => sortedCandidates.filter((candidate) => candidate.status === 'new' && (kind === 'all' || candidate.kind === kind)),
     [sortedCandidates, kind],
@@ -242,11 +277,12 @@ export function App() {
     await scanWith([{ sourceId: id, files }]);
   };
 
-  const pickExportSource = async () => {
-    const files = await chooseFiles({ accept: '.json,application/json' });
-    if (!files.length) return;
-    await actions.resetSource('web-export');
-    await actions.saveSource({ id: 'web-export', label: files[0].name, conversations: 0 });
+  // 网页版聊天记录导出可以分几次导入（比如先 ChatGPT 再 Claude），按对话合并，不清掉之前的
+  const importChats = async (files: File[], kinds: ChatExportKind[]) => {
+    const current = sources.find((source) => source.id === 'web-export');
+    const known = new Set((current?.label ?? '').split('、').filter((name) => Object.values(CHAT_EXPORT_NAMES).includes(name)));
+    kinds.forEach((kind) => known.add(CHAT_EXPORT_NAMES[kind]));
+    await actions.saveSource({ id: 'web-export', label: [...known].join('、'), conversations: current?.conversations ?? 0, lastScanAt: current?.lastScanAt });
     await scanWith([{ sourceId: 'web-export', files }]);
   };
 
@@ -257,13 +293,30 @@ export function App() {
       if (await ensureReadPermission(source.handle)) jobs.push({ sourceId: source.id, handle: source.handle });
     }
     if (jobs.length) await scanWith(jobs);
-    else setDialog({ kind: 'sources' });
+    else setDialog({ kind: 'settings', tab: 'sources' });
   };
 
   // ---------- 导入、备份、生成 ----------
   const openImport = async (files: File[]) => {
     const entries = await Promise.all(files.map(async (file) => readImportFile(file.name, await file.text())));
     setDialog({ kind: 'import', entries });
+  };
+
+  // 文件进来先分流：网页版聊天记录导出去扫描，提示词文件、备份、候选文件走导入确认
+  const importFiles = async (files: File[]) => {
+    const chats: File[] = [];
+    const kinds = new Set<ChatExportKind>();
+    const others: File[] = [];
+    for (const file of files) {
+      const found = await readChatExport(file);
+      if (!found) others.push(file);
+      else {
+        chats.push(...found.files);
+        found.kinds.forEach((kind) => kinds.add(kind));
+      }
+    }
+    if (chats.length) await importChats(chats, [...kinds]);
+    if (others.length) await openImport(others);
   };
 
   const runImport = async (entries: ImportEntry[]) => {
@@ -302,8 +355,8 @@ export function App() {
   // ---------- 把文件拖进窗口 ----------
   const dialogOpen = useRef(false);
   dialogOpen.current = dialog !== null;
-  const openImportRef = useRef(openImport);
-  openImportRef.current = openImport;
+  const importFilesRef = useRef(importFiles);
+  importFilesRef.current = importFiles;
 
   useEffect(() => {
     let depth = 0;
@@ -328,7 +381,7 @@ export function App() {
       depth = 0;
       setDragging(false);
       const files = Array.from(event.dataTransfer?.files ?? []);
-      if (files.length && !dialogOpen.current) void openImportRef.current(files);
+      if (files.length && !dialogOpen.current) void importFilesRef.current(files);
     };
     window.addEventListener('dragenter', enter);
     window.addEventListener('dragover', over);
@@ -342,15 +395,18 @@ export function App() {
     };
   }, []);
 
-  const backupDue = !!settings?.changedSinceBackup && (!settings.lastBackupAt || Date.now() - settings.lastBackupAt > BACKUP_REMIND_AFTER);
   const rules = items.filter((item) => item.type === 'rule');
   const tagNames = tags.map((entry) => entry.tag);
   const relatedPrompts = hits ? Math.min(3, hits.filter((hit) => hit.item.type === 'prompt').length) : 0;
   const closeDialog = useCallback(() => setDialog(null), []);
 
   return (
-    <div className="app">
+    <div className={`app${sideCollapsed ? ' side-collapsed' : ''}`}>
       <Sidebar
+        collapsed={sideCollapsed}
+        onToggle={toggleSide}
+        dark={mode === 'dark'}
+        onToggleDark={() => void updateSettings({ theme: mode === 'dark' ? 'light' : 'dark' })}
         view={view}
         filter={filter}
         newCandidates={newCount}
@@ -358,18 +414,12 @@ export function App() {
         prompts={items.length - rules.length}
         rules={rules.length}
         tags={tags}
-        backupDue={backupDue}
         onDiscover={() => setView('discover')}
         onFilter={(next) => {
           setFilter(next);
           setView('library');
         }}
-        onImport={() =>
-          void chooseFiles({ accept: '.md,.markdown,.txt,.json', multiple: true }).then((files) => {
-            if (files.length) void openImport(files);
-          })
-        }
-        onSettings={() => setDialog({ kind: 'settings' })}
+        onSettings={() => setDialog({ kind: 'settings', tab: 'sources' })}
       />
 
       {view === 'discover' ? (
@@ -381,29 +431,32 @@ export function App() {
             selectedId={currentCandidate?.id ?? null}
             onSelect={setCandidateId}
             sources={sources}
-            sampleTools={samplesInDiscover ? SAMPLE_TOOL_COUNTS : null}
             scanning={scanning}
             canRescan={sources.some((source) => !!source.handle)}
             onRescan={() => void rescan()}
-            onSources={() => setDialog({ kind: 'sources' })}
-            refine={isConfigured(settings?.llm) ? { pending: refinePending.length } : null}
-            onRefine={() =>
-              void db.utterances.toArray().then((utterances) => setDialog({ kind: 'refine', groups: buildRefineGroups(refinePending, utterances) }))
-            }
-            onSettings={() => setDialog({ kind: 'settings' })}
-            hiddenCount={hiddenCount}
-            showHidden={showHidden}
-            onToggleHidden={() => setShowHidden(!showHidden)}
+            onSources={() => setDialog({ kind: 'settings', tab: 'sources' })}
+            advice={advice}
           />
           {currentCandidate ? (
             <CandidateDetail
-              key={currentCandidate.id}
+              key={`${currentCandidate.id}:${advice[currentCandidate.id]?.status ?? ''}`}
               candidate={currentCandidate}
               tagSuggestions={tagNames}
               busy={busy}
               onSave={(edits) => void handleSave(currentCandidate, edits)}
               onIgnore={() => void handleIgnore(currentCandidate)}
-              aiNote={actions.isLocalCandidate(currentCandidate) ? aiSkipped[currentCandidate.id] : undefined}
+              onCopy={(text) => void copy(text)}
+              ai={
+                actions.isLocalCandidate(currentCandidate)
+                  ? {
+                      ready: isConfigured(settings?.llm),
+                      advice: advice[currentCandidate.id],
+                      onAsk: (signal) => askAi(currentCandidate, signal),
+                      onStatus: (status) => void actions.setAdviceStatus(currentCandidate.id, status),
+                      onSettings: () => setDialog({ kind: 'settings', tab: 'model' }),
+                    }
+                  : undefined
+              }
             />
           ) : (
             <section className="detail">
@@ -424,10 +477,6 @@ export function App() {
             onNew={() => void handleNew()}
             onGenerate={() => setDialog({ kind: 'generate', need: query.trim() })}
             relatedCount={relatedPrompts}
-            showBanner={!!settings && !settings.bannerDismissed && sampleCount > 0}
-            sampleCount={sampleCount}
-            onClearSamples={() => void actions.clearSamples().then((count) => notify(`已清除 ${count} 条示例`))}
-            onDismissBanner={() => void actions.dismissBanner()}
             emptyLibrary={items.length === 0}
             showRulesExport={filter.kind === 'type' && filter.type === 'rule' && rules.length > 0}
             onExportRules={() => setDialog({ kind: 'export-rules' })}
@@ -494,32 +543,44 @@ export function App() {
         />
       )}
       {dialog?.kind === 'import' && <ImportDialog entries={dialog.entries} onClose={closeDialog} onImport={() => void runImport(dialog.entries)} />}
-      {dialog?.kind === 'settings' && settings && <SettingsDialog settings={settings} onClose={closeDialog} onBackup={() => void backup()} />}
-      {dialog?.kind === 'sources' && (
-        <SourcesDialog
-          sources={sources}
-          matched={matched}
-          compressed={compressed}
-          scanning={scanning}
-          folderPicker={supportsFolderPicker()}
-          onPickFolder={(id) => void pickFolderSource(id)}
-          onPickExport={() => void pickExportSource()}
-          onDownloadSkill={() =>
-            void import('./skillPackage').then(({ skillZip }) => {
-              downloadBlob(`${SKILL_NAME}.zip`, new Blob([skillZip() as BlobPart], { type: 'application/zip' }));
-              notify(`已下载 ${SKILL_NAME}.zip，解压后放进 Agent 的技能文件夹`);
-            })
-          }
-          onCopyAgentPrompt={(text) => void copy(text, '已复制，发给你的 Agent 就行')}
+      {dialog?.kind === 'settings' && settings && (
+        <SettingsDialog
+          settings={settings}
+          tab={dialog.tab}
+          sources={{
+            sources,
+            matched,
+            compressed,
+            scanning,
+            folderPicker: supportsFolderPicker(),
+            onPickFolder: (id) => void pickFolderSource(id),
+            onImportFiles: (files) => void importFiles(files),
+            onDownloadSkill: () =>
+              void import('./skillPackage').then(({ skillZip }) => {
+                downloadBlob(`${SKILL_NAME}.zip`, new Blob([skillZip() as BlobPart], { type: 'application/zip' }));
+                notify(`已下载 ${SKILL_NAME}.zip，解压后放进 Agent 的技能文件夹`);
+              }),
+            onCopy: (text, message) => void copy(text, message),
+          }}
+          onBackup={() => void backup()}
+          sampleCount={sampleCount}
+          onClearSamples={() => void actions.clearSamples().then((count) => notify(`已清除 ${count} 条示例`))}
+          refinePending={refinePending.length}
+          onRefineAll={() => setDialog({ kind: 'refine', groups: buildRefineGroups(refinePending) })}
           onClose={closeDialog}
         />
       )}
-      {dialog?.kind === 'refine' && settings?.llm && (
+      {dialog?.kind === 'refine' && (
         <RefineDialog
           groups={dialog.groups}
-          llm={settings.llm}
-          providerName={providerOf(settings.llm.provider).name}
-          onBatch={actions.applyRefine}
+          llm={isConfigured(settings?.llm) ? settings.llm : undefined}
+          providerName={settings?.llm ? serviceName(settings.llm) : ''}
+          onBatch={async (outcome, batch) => {
+            const result = adviceFromOutcome(outcome, batch);
+            await actions.saveAdvice(result);
+            return result;
+          }}
+          onSettings={() => setDialog({ kind: 'settings', tab: 'model' })}
           onClose={closeDialog}
         />
       )}

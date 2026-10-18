@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { extractVariables, fillVariables, segmentVariables } from './variables';
 import { queryTerms, searchItems } from './search';
 import {
@@ -13,6 +13,10 @@ import { makeBackup, parseFrontmatter, readImportFile } from './importers';
 import { formatAgo, formatListTime } from './time';
 import { applyFilter, tagCounts } from './items';
 import { sampleItems } from '../samples/library';
+import { chatModels, listModels, PROVIDERS } from './llm';
+import { readChatExport, sniffChatExport } from './chatExport';
+import { filesInZip } from './unzip';
+import { crc32, makeZip } from './zip';
 
 describe('变量', () => {
   const text = '语气：{{语气}}\n记录：{{本周工作}}\n再说一次 {{语气}}，{{ 空格 }}';
@@ -259,20 +263,19 @@ describe('打包 Skill', () => {
 describe('AI 提炼', () => {
   const now = new Date('2026-10-16T15:00:00+08:00').getTime();
 
-  it('交给模型的组：本地候选加上明确要求，原话截短', async () => {
-    const { buildRefineGroups, groupsPayload, isStanding } = await import('./refine');
+  it('交给模型的组：每条本地候选一组，名称只留在界面上，原话截短', async () => {
+    const { buildRefineGroups, groupsPayload } = await import('./refine');
     const { sampleConversations } = await import('../samples/conversations');
     const { extractUtterances } = await import('./discover/classify');
     const { buildCandidates } = await import('./discover/candidates');
     const utterances = sampleConversations(now).flatMap((conversation) => extractUtterances(conversation, true));
     const locals = buildCandidates(utterances, sampleItems(now), []);
-    const extra = { id: 'x', tool: 'codex' as const, session: 's', at: now, role: 'correction' as const, text: '记住，以后回答都别用 emoji' };
-    const groups = buildRefineGroups(locals, [...utterances, extra]);
-    expect(groups.filter((group) => group.kind !== 'standing')).toHaveLength(5);
-    expect(groups.find((group) => group.kind === 'standing')?.quotes[0].text).toBe('记住，以后回答都别用 emoji');
-    expect(isStanding('这个接口以后一直报错')).toBe(false);
+    const groups = buildRefineGroups(locals);
+    expect(groups).toHaveLength(5);
+    expect(groups.every((group) => locals.some((local) => local.id === group.id && local.title === group.title))).toBe(true);
     const payload = JSON.parse(groupsPayload(groups));
     expect(payload[0]).toHaveProperty('localTemplate');
+    expect(payload[0]).not.toHaveProperty('title');
     expect(payload[0].quotes[0]).toHaveProperty('date');
   });
 
@@ -282,12 +285,11 @@ describe('AI 提炼', () => {
       { id: 'prompt-a', kind: 'task' as const, count: 6, conversations: 6, days: 5, tools: ['codex' as const], quotes: [{ tool: 'codex' as const, at: now, text: '改成小红书风格：……' }] },
       { id: 'rule-chinese', kind: 'correction' as const, count: 12, conversations: 10, days: 9, tools: ['codex' as const, 'claude-code' as const], quotes: [{ tool: 'codex' as const, at: now - 1000, text: '用中文回答' }] },
       { id: 'prompt-b', kind: 'task' as const, count: 3, conversations: 3, days: 3, tools: ['chatgpt' as const], quotes: [{ tool: 'chatgpt' as const, at: now, text: '看看这个报错' }] },
-      { id: 'standing-1', kind: 'standing' as const, count: 1, conversations: 1, days: 1, tools: ['codex' as const], quotes: [{ tool: 'codex' as const, at: now, text: '以后都用中文' }] },
     ];
     const answer = '```json\n' + JSON.stringify({
       candidates: [
         { type: 'prompt', title: '小红书风格改写', content: '把下面这段改成小红书风格：\n{{内容}}', reason: '6 次', confidence: 'high', count: 999, basedOn: ['prompt-a'] },
-        { type: 'rule', title: '回答用中文', content: '回答使用中文。', reason: '12 次纠正，加上明确要求', confidence: 'high', scope: 'global', basedOn: ['rule-chinese', 'standing-1'] },
+        { type: 'rule', title: '回答用中文', content: '回答使用中文。', reason: '12 次纠正', confidence: 'high', scope: 'global', basedOn: ['rule-chinese', 'nope'] },
         { type: 'rule', title: '编出来的', content: '不存在', reason: '无', confidence: 'high', basedOn: ['nope'] },
         { type: 'prompt', title: '没把握', content: '随便', reason: '1 次', confidence: 'low', basedOn: ['prompt-b'] },
       ],
@@ -296,11 +298,26 @@ describe('AI 提炼', () => {
     const outcome = parseRefineResponse(answer, groups, now);
     expect(outcome.candidates.map((candidate) => [candidate.title, candidate.count, candidate.origin])).toEqual([
       ['小红书风格改写', 6, 'ai'],
-      ['回答用中文', 13, 'ai'],
+      ['回答用中文', 12, 'ai'],
     ]);
     expect(outcome.candidates[1].basedOn).toEqual(['rule-chinese']);
     expect(outcome.candidates[1].scope).toBe('global');
     expect(outcome.skipped).toEqual({ 'prompt-b': '针对具体报错，一次性的' });
+  });
+
+  it('模型的回答变成每条候选的意见：几条合成一条时，其余标成重复；没提到的不给意见', async () => {
+    const { adviceFromOutcome, parseRefineResponse } = await import('./refine');
+    const group = (id: string, title: string) => ({ id, title, kind: 'task' as const, count: 3, conversations: 3, days: 3, tools: ['codex' as const], quotes: [{ tool: 'codex' as const, at: now, text: title }] });
+    const groups = [group('a', '周报整理'), group('b', '整理周报'), group('c', '看报错'), group('d', '没提到')];
+    const answer = JSON.stringify({
+      candidates: [{ type: 'prompt', title: '周报生成', content: '把这周的工作整理成周报：{{本周工作}}', reason: '3 周里 6 次', confidence: 'high', tags: ['工作'], basedOn: ['a', 'b'] }],
+      skipped: [{ id: 'c', why: '针对具体报错' }],
+    });
+    const advice = adviceFromOutcome(parseRefineResponse(answer, groups, now), groups, now);
+    expect(advice.a).toMatchObject({ verdict: 'keep', title: '周报生成', content: '把这周的工作整理成周报：{{本周工作}}', kind: 'prompt', reason: '3 周里 6 次', tags: ['工作'] });
+    expect(advice.b).toEqual({ verdict: 'duplicate', of: 'a', ofTitle: '周报整理', at: now });
+    expect(advice.c).toEqual({ verdict: 'skip', reason: '针对具体报错', at: now });
+    expect(advice.d).toBeUndefined();
   });
 
   it('不是 JSON 时给出能看懂的错误', async () => {
@@ -312,5 +329,138 @@ describe('AI 提炼', () => {
     const { REFINE_SYSTEM } = await import('./refine');
     expect(REFINE_SYSTEM).toContain('大多数对话是一次性的');
     expect(REFINE_SYSTEM).toContain('basedOn');
+  });
+});
+
+describe('模型列表', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('去掉向量、语音这类不能对话的模型，去重排序', () => {
+    expect(chatModels(['text-embedding-3-small', 'gpt-b', 'models/gemini-x', 'whisper-1', 'gpt-a', 'gpt-a', 'tts-1'])).toEqual(['gemini-x', 'gpt-a', 'gpt-b']);
+  });
+
+  it('全被去掉时保留原列表', () => {
+    expect(chatModels(['bge-m3', 'text-embedding-v3'])).toEqual(['bge-m3', 'text-embedding-v3']);
+  });
+
+  it('读到列表', async () => {
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ data: [{ id: 'deepseek-chat' }, { id: 'deepseek-reasoner' }] })));
+    expect(await listModels({ provider: 'deepseek', apiKey: 'k', model: '' })).toEqual({ models: ['deepseek-chat', 'deepseek-reasoner'] });
+  });
+
+  it('Key 不对时说出原因', async () => {
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ error: { message: 'bad key' } }), { status: 401 }));
+    const result = await listModels({ provider: 'deepseek', apiKey: 'k', model: '' });
+    expect(result.models).toEqual([]);
+    expect(result.error).toContain('Key 无效');
+  });
+
+  it('自建地址连不上时提示开启跨域', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    const result = await listModels({ provider: 'custom', apiKey: 'k', model: '', baseUrl: 'https://example.com/v1' });
+    expect(result.error).toContain('CORS');
+  });
+
+  it('超时时说明是等太久，不说连不上', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new DOMException('signal timed out', 'TimeoutError');
+    });
+    const result = await listModels({ provider: 'deepseek', apiKey: 'k', model: '' });
+    expect(result.error).toContain('等了太久');
+  });
+
+  it('自己取消的请求照常中断，不当成错误', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new DOMException('aborted', 'AbortError');
+    });
+    await expect(listModels({ provider: 'deepseek', apiKey: 'k', model: '' })).rejects.toThrow('aborted');
+  });
+
+  it('Anthropic 带上网页直接调用需要的请求头', async () => {
+    let headers: Record<string, string> = {};
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      headers = init.headers as Record<string, string>;
+      return new Response(JSON.stringify({ data: [{ id: 'claude-x' }] }));
+    });
+    await listModels({ provider: 'anthropic', apiKey: 'sk-ant', model: '' });
+    expect(headers['anthropic-dangerous-direct-browser-access']).toBe('true');
+    expect(headers['x-api-key']).toBe('sk-ant');
+  });
+
+  it('每家服务商只出现一次，地址都是 https', () => {
+    expect(new Set(PROVIDERS.map((provider) => provider.id)).size).toBe(PROVIDERS.length);
+    for (const provider of PROVIDERS.filter((item) => item.id !== 'custom')) expect(provider.baseUrl).toMatch(/^https:\/\//);
+  });
+});
+
+/** 测试用：做一个用 deflate 压缩的单文件 zip，和真实的导出一样。 */
+async function deflateZip(path: string, content: string): Promise<Blob> {
+  const encoder = new TextEncoder();
+  const name = encoder.encode(path);
+  const raw = encoder.encode(content);
+  const packed = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+  const local = new DataView(new ArrayBuffer(30));
+  local.setUint32(0, 0x04034b50, true);
+  local.setUint16(8, 8, true);
+  local.setUint32(14, crc32(raw), true);
+  local.setUint32(18, packed.length, true);
+  local.setUint32(22, raw.length, true);
+  local.setUint16(26, name.length, true);
+  const central = new DataView(new ArrayBuffer(46));
+  central.setUint32(0, 0x02014b50, true);
+  central.setUint16(10, 8, true);
+  central.setUint32(16, crc32(raw), true);
+  central.setUint32(20, packed.length, true);
+  central.setUint32(24, raw.length, true);
+  central.setUint16(28, name.length, true);
+  const localSize = 30 + name.length + packed.length;
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, 1, true);
+  end.setUint16(10, 1, true);
+  end.setUint32(12, 46 + name.length, true);
+  end.setUint32(16, localSize, true);
+  return new Blob([local, name, packed, central, name, end]);
+}
+
+describe('网页版聊天记录导出', () => {
+  const chatgpt = JSON.stringify([{ title: '周报', create_time: 1, mapping: { a: { message: null } } }]);
+  const claude = JSON.stringify([{ uuid: 'c1', name: '周报', account: { uuid: 'u' }, chat_messages: [] }]);
+
+  it('从不压缩的 zip 里取出文件，不管在哪个目录', async () => {
+    const zip = new Blob([makeZip([{ path: 'readme.txt', content: 'x' }, { path: 'export/conversations.json', content: chatgpt }]) as BlobPart]);
+    const files = await filesInZip(zip, (name) => name === 'conversations.json');
+    expect(files.map((file) => file.name)).toEqual(['conversations.json']);
+    expect(await files[0].text()).toBe(chatgpt);
+  });
+
+  it('从 deflate 压缩的 zip 里取出文件', async () => {
+    const zip = await deflateZip('conversations.json', claude.repeat(1));
+    const files = await filesInZip(zip, (name) => name === 'conversations.json');
+    expect(await files[0].text()).toBe(claude);
+  });
+
+  it('认出是哪家的导出', async () => {
+    expect(await sniffChatExport(new Blob([chatgpt]))).toBe('chatgpt');
+    expect(await sniffChatExport(new Blob([claude]))).toBe('claude');
+    expect(await sniffChatExport(new Blob([JSON.stringify({ app: 'promptbox', items: [] })]))).toBeNull();
+  });
+
+  it('zip 和 conversations.json 都能认，改名后两家不会互相覆盖', async () => {
+    const fromZip = await readChatExport(new File([makeZip([{ path: 'conversations.json', content: chatgpt }]) as BlobPart], 'chatgpt-export.zip'));
+    expect(fromZip?.kinds).toEqual(['chatgpt']);
+    expect(fromZip?.files[0].name).toBe('ChatGPT · conversations.json');
+    const fromJson = await readChatExport(new File([claude], 'conversations.json'));
+    expect(fromJson?.kinds).toEqual(['claude']);
+    expect(fromJson?.files[0].name).toBe('Claude · conversations.json');
+  });
+
+  it('不是聊天记录时交给普通导入', async () => {
+    expect(await readChatExport(new File([JSON.stringify({ app: 'promptbox', items: [] })], 'backup.json'))).toBeNull();
+    expect(await readChatExport(new File([makeZip([{ path: 'notes.md', content: '# x' }]) as BlobPart], 'notes.zip'))).toBeNull();
+    expect(await readChatExport(new File(['not a zip'], 'broken.zip'))).toBeNull();
+    expect(await readChatExport(new File(['# 标题'], 'prompt.md'))).toBeNull();
   });
 });

@@ -9,7 +9,7 @@ import { clip } from '../logic/text';
 import { formatListTime, formatQuoteTime } from '../logic/time';
 import { extractVariables } from '../logic/variables';
 import type { Item, ItemType, ScopeFields } from '../types';
-import { itemScope, scopeKey } from '../logic/scope';
+import { itemScope } from '../logic/scope';
 import { ScopeEditor } from './ScopeEditor';
 import { Editor } from './Editor';
 import { PromptIcon, RuleIcon, TOOL_NAMES } from './Icons';
@@ -32,7 +32,7 @@ function originText(item: Item): string {
   const label = ORIGIN_LABELS[item.origin];
   switch (item.origin) {
     case 'import':
-      return `来源：导入 ${item.originDetail ?? ''}${item.skillName ? ' · 再导出成 Skill 时会带上名称和描述' : ''}`;
+      return `来源：导入 ${item.originDetail ?? ''}`;
     case 'discover':
       return `来源：发现${item.originDetail ? ` · ${item.originDetail}` : ''}`;
     case 'generate':
@@ -47,6 +47,9 @@ export function ItemDetail({ item, tagSuggestions, focusTitle, onCopy, onExport,
   const [pending, setPending] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showQuotes, setShowQuotes] = useState(false);
+  // 备注平时收成一个「+ 备注」，写过备注或点开了才显示输入框
+  const [noteOpen, setNoteOpen] = useState(false);
+  const showNote = noteOpen || !!draft.note;
   const latest = useRef(draft);
   const timer = useRef<number | undefined>(undefined);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -183,25 +186,32 @@ export function ItemDetail({ item, tagSuggestions, focusTitle, onCopy, onExport,
           </button>
         </div>
         <TagEditor tags={item.tags} suggestions={tagSuggestions} onChange={(tags) => void updateItem(itemId, { tags })} />
+        {!showNote && (
+          <button type="button" className="tag-add" onClick={() => setNoteOpen(true)}>
+            + 备注
+          </button>
+        )}
       </div>
 
       {item.type === 'rule' && (
         <>
           <ScopeEditor value={draft} onChange={edit} allowUnconfirmed={false} />
-          {!scopeKey(draft) && <p className="hint-line">填上项目名或任务类型后，这条规则才会在对应的场景里被参考。</p>}
         </>
       )}
 
-      <div className="fields">
-        <label htmlFor={`note-${itemId}`}>备注</label>
-        <input
-          id={`note-${itemId}`}
-          className="input"
-          value={draft.note}
-          placeholder="可选，比如适用的模型、来源"
-          onChange={(event) => edit({ note: event.target.value })}
-        />
-      </div>
+      {showNote && (
+        <div className="fields">
+          <label htmlFor={`note-${itemId}`}>备注</label>
+          <input
+            id={`note-${itemId}`}
+            className="input"
+            value={draft.note}
+            placeholder="比如适用的模型、来源"
+            autoFocus={noteOpen && !draft.note}
+            onChange={(event) => edit({ note: event.target.value })}
+          />
+        </div>
+      )}
 
       <Editor
         label="正文"
@@ -216,7 +226,7 @@ export function ItemDetail({ item, tagSuggestions, focusTitle, onCopy, onExport,
         {variables.map((name) => (
           <code key={name}>{`{{${name}}}`}</code>
         ))}
-        <span className="saved">{pending ? '正在保存…' : `已自动保存 · ${formatListTime(item.updatedAt)}`}</span>
+        <span className="saved" title={`已自动保存 · ${formatListTime(item.updatedAt)}`}>{pending ? '正在保存…' : '已保存'}</span>
       </div>
 
       {item.evidence && (

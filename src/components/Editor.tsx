@@ -1,6 +1,8 @@
 // 编辑区：透明文本框叠在高亮层上。变量 {{…}} 用浅灰底，从纠正里合并进来的要求加下划线。
+// 传了 onCopy 时右上角有一个复制按钮。
 
-import { useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { CheckIcon, CopyIcon } from './Icons';
 
 interface Props {
   value: string;
@@ -10,6 +12,8 @@ interface Props {
   placeholder?: string;
   short?: boolean;
   label: string;
+  /** 复制当前内容。 */
+  onCopy?: () => void;
 }
 
 const VARIABLE = /\{\{[^{}\n]{1,20}\}\}/g;
@@ -40,10 +44,32 @@ function highlight(text: string, underline: string[]): ReactNode[] {
   return nodes;
 }
 
-export function Editor({ value, onChange, underline = [], placeholder, short, label }: Props) {
+export function Editor({ value, onChange, underline = [], placeholder, short, label, onCopy }: Props) {
   const backdrop = useRef<HTMLDivElement>(null);
+  // 点了复制，图标换成对勾一会儿
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
   return (
-    <div className={`editor${short ? ' short' : ''}`}>
+    <div className={`editor${short ? ' short' : ''}${onCopy ? ' has-copy' : ''}`}>
+      {onCopy && (
+        <button
+          type="button"
+          className="editor-copy"
+          title="复制"
+          aria-label={`复制${label}`}
+          disabled={!value.trim()}
+          onClick={() => {
+            onCopy();
+            setCopied(true);
+          }}
+        >
+          {copied ? <CheckIcon /> : <CopyIcon />}
+        </button>
+      )}
       <div ref={backdrop} className="backdrop" aria-hidden="true">
         {highlight(value, underline)}
       </div>
