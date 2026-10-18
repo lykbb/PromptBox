@@ -69,11 +69,17 @@ npm run dev
 
 ### 桌面版（macOS）
 
+已打包版本见 [GitHub Releases](https://github.com/lykbb/PromptBox/releases/latest)，下载 `PromptBox-macOS-v0.1.0.zip` 后解压。仓库为私有时，需要有仓库访问权限才能下载。
+
+也可以自行打包：
+
 ```bash
 npm run package:mac
 ```
 
-生成 `release/PromptBox.app`，拖到桌面或「应用程序」里，双击就能用。不需要装别的东西：它用系统自带的 python3 在本机起一个只给自己用的网页服务（只监听 `127.0.0.1:5190`，别的电脑访问不到），再用 Chrome 的独立窗口打开。桌面版不带示例，打开就是空的；数据存在 Chrome 里，和开发服务器（5180）的互不影响。关掉窗口后后台服务还在，下次双击直接打开；想停掉可以重启电脑，或者运行 `lsof -ti tcp:5190 | xargs kill`。
+生成 `release/PromptBox.app`，可以放到桌面或「应用程序」里打开。这个轻量启动器依赖本机的 `/usr/bin/python3`，包内不含 Python 和浏览器运行时；它在本机启动网页服务（只监听 `127.0.0.1:5190`，别的电脑访问不到），检测到 `/Applications/Google Chrome.app` 时使用 Chrome 独立窗口，否则尝试打开默认浏览器。当前包未签名、未做 Apple 公证，macOS 可能限制首次打开。
+
+桌面版不带示例，数据保存在使用的浏览器里，和开发服务器（5180）的互不影响。关闭窗口后后台服务仍运行，下次打开会复用服务。若 5190 端口已被其他服务占用，启动器可能打开错误页面，应先确认端口占用；不要直接终止不明进程。需要停止时可以重启电脑，或确认占用进程确实为 PromptBox 的服务后再结束该进程。
 
 ### 记录来源
 
