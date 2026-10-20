@@ -1,9 +1,10 @@
 // 页面这边的扫描入口：选文件夹、申请读取权限、把活交给后台线程。
 
 import type { ScanJob, ScanMessage, ScanResult } from './protocol';
+import { isDesktop, readNativeFolder } from '../desktop';
 
 export function supportsFolderPicker(): boolean {
-  return typeof window.showDirectoryPicker === 'function';
+  return isDesktop() || typeof window.showDirectoryPicker === 'function';
 }
 
 /** 让用户选一个文件夹；取消时返回 null。 */
@@ -23,11 +24,15 @@ export async function ensureReadPermission(handle: FileSystemDirectoryHandle): P
   return (await handle.requestPermission?.(descriptor)) === 'granted';
 }
 
-export function runScan(
+export async function runScan(
   jobs: ScanJob[],
   known: Record<string, { size: number; modified: number }>,
   onProgress: (done: number, total: number) => void,
 ): Promise<ScanResult[]> {
+  const prepared: ScanJob[] = [];
+  for (const job of jobs) {
+    prepared.push('native' in job ? { sourceId: job.sourceId, ...await readNativeFolder(job.sourceId, known) } : job);
+  }
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./scan.worker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (event: MessageEvent<ScanMessage>) => {
@@ -44,6 +49,6 @@ export function runScan(
       worker.terminate();
       reject(new Error(event.message || '扫描线程出错了'));
     };
-    worker.postMessage({ jobs, known });
+    worker.postMessage({ jobs: prepared, known });
   });
 }

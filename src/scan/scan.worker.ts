@@ -41,7 +41,14 @@ async function scan({ jobs, known }: ScanRequest): Promise<ScanResult[]> {
   for (const job of jobs) {
     matched.set(job.sourceId, 0);
     compressed.set(job.sourceId, 0);
-    if ('handle' in job) {
+    if ('native' in job) throw new Error('本机文件尚未读取');
+    if ('records' in job) {
+      matched.set(job.sourceId, job.matched);
+      compressed.set(job.sourceId, job.compressed);
+      for (const record of job.records) {
+        pending.push({ sourceId: job.sourceId, path: record.path, file: async () => new File([record.content], record.path.split('/').pop()!, { lastModified: record.modified }) });
+      }
+    } else if ('handle' in job) {
       for await (const { path, handle } of walk(job.handle)) {
         if (isCompressedRecord(job.sourceId, path)) compressed.set(job.sourceId, (compressed.get(job.sourceId) ?? 0) + 1);
         if (!isRecordFile(job.sourceId, path)) continue;

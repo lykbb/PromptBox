@@ -4,6 +4,7 @@
 // xAI、硅基流动、百度千帆的跨域设置用的是通配符，Chrome、Edge 能用，Firefox、Safari 可能被拦。
 
 import type { LlmProvider, LlmSettings } from '../types';
+import { desktopFetch, isDesktop } from '../desktop';
 
 export interface ProviderPreset {
   id: LlmProvider;
@@ -122,7 +123,7 @@ async function request(settings: LlmSettings, path: string, init: RequestInit, s
   const apiKey = settings.apiKey.trim();
   let response: Response;
   try {
-    response = await fetch(endpoint(settings, path), {
+    response = await (isDesktop() ? desktopFetch : fetch)(endpoint(settings, path), {
       ...init,
       signal,
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...preset.headers?.(apiKey), ...init.headers },

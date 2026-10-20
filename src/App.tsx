@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { chooseFiles, copyText, downloadBlob, downloadText } from './browser';
+import { desktopCall, isDesktop, nativeFiles, pickNativeFolder } from './desktop';
 import { CandidateDetail } from './components/CandidateDetail';
 import { CopyDialog } from './components/CopyDialog';
 import { DiscoverList, type KindFilter } from './components/DiscoverList';
@@ -19,6 +20,7 @@ import { Sidebar } from './components/Sidebar';
 import { Toast, type ToastState } from './components/Toast';
 import * as actions from './db/actions';
 import { db, getSettings, updateSettings } from './db/db';
+import { flushDesktopStorage } from './db/desktopStorage';
 import { useLive } from './db/live';
 import { titleFromNeed } from './logic/generate';
 import { readImportFile, type ImportEntry } from './logic/importers';
@@ -262,6 +264,16 @@ export function App() {
   };
 
   const pickFolderSource = async (id: FolderSourceId) => {
+    if (isDesktop()) {
+      try {
+        const folder = await pickNativeFolder(id);
+        if (!folder) return;
+        await actions.resetSource(id);
+        await actions.saveSource({ id, nativeFolder: true, label: folder.name, conversations: 0 });
+        await scanWith([{ sourceId: id, native: true }]);
+      } catch (error) { notify(error instanceof Error ? error.message : '无法读取文件夹'); }
+      return;
+    }
     if (supportsFolderPicker()) {
       const handle = await pickFolder(id);
       if (!handle) return;
@@ -289,6 +301,10 @@ export function App() {
   const rescan = async () => {
     const jobs: ScanJob[] = [];
     for (const source of sources) {
+      if (isDesktop() && source.nativeFolder && source.id !== 'web-export') {
+        jobs.push({ sourceId: source.id, native: true });
+        continue;
+      }
       if (source.id === 'web-export' || !source.handle) continue;
       if (await ensureReadPermission(source.handle)) jobs.push({ sourceId: source.id, handle: source.handle });
     }
@@ -336,8 +352,12 @@ export function App() {
 
   const backup = async () => {
     const { fileName, text } = await actions.exportBackup();
-    downloadText(fileName, text, 'application/json');
-    notify('备份文件已下载');
+    try {
+      if (await downloadText(fileName, text, 'application/json')) {
+        await updateSettings({ lastBackupAt: Date.now(), changedSinceBackup: false });
+        notify('备份文件已保存');
+      }
+    } catch (error) { notify(error instanceof Error ? error.message : '备份保存失败'); }
   };
 
   const saveGenerated = async (fields: ScopeFields & { need: string; content: string; refs: Item[] }) => {
@@ -400,6 +420,40 @@ export function App() {
   const relatedPrompts = hits ? Math.min(3, hits.filter((hit) => hit.item.type === 'prompt').length) : 0;
   const closeDialog = useCallback(() => setDialog(null), []);
 
+  useEffect(() => {
+    if (!isDesktop()) return;
+    const command = (event: Event) => {
+      const action = (event as CustomEvent<string>).detail;
+      if (action === 'new') void handleNew();
+      if (action === 'settings' || action === 'about') setDialog({ kind: 'settings', tab: action === 'about' ? 'about' : 'sources' });
+      if (action === 'backup') void backup();
+      if (action === 'import') void chooseFiles({ accept: '.zip,.json,.md,.markdown,.txt', multiple: true }).then(importFiles).catch((error: unknown) => notify(String(error)));
+    };
+    const files = (event: Event) => void importFiles(nativeFiles((event as CustomEvent<Parameters<typeof nativeFiles>[0]>).detail)).catch((error: unknown) => notify(String(error)));
+    const storageError = (event: Event) => notify(`写入 data 文件夹失败：${(event as CustomEvent<string>).detail}`);
+    window.addEventListener('promptbox-command', command);
+    window.addEventListener('promptbox-files', files);
+    window.addEventListener('promptbox-storage-error', storageError);
+    window.promptboxBeforeQuit = async () => {
+      window.dispatchEvent(new Event('pagehide'));
+      await db.transaction('r', db.items, db.kv, () => db.items.count());
+      await flushDesktopStorage();
+    };
+    void desktopCall('ready').catch(() => {});
+    return () => {
+      window.removeEventListener('promptbox-command', command);
+      window.removeEventListener('promptbox-files', files);
+      window.removeEventListener('promptbox-storage-error', storageError);
+      delete window.promptboxBeforeQuit;
+    };
+  });
+
+  const saveExport = async (fileName: string, text: string) => {
+    try {
+      if (await downloadText(fileName, text)) { setDialog(null); notify(`已保存 ${fileName}`); }
+    } catch (error) { notify(error instanceof Error ? error.message : '保存失败'); }
+  };
+
   return (
     <div className={`app${sideCollapsed ? ' side-collapsed' : ''}`}>
       <Sidebar
@@ -432,7 +486,7 @@ export function App() {
             onSelect={setCandidateId}
             sources={sources}
             scanning={scanning}
-            canRescan={sources.some((source) => !!source.handle)}
+            canRescan={sources.some((source) => !!source.handle || (isDesktop() && source.nativeFolder))}
             onRescan={() => void rescan()}
             onSources={() => setDialog({ kind: 'settings', tab: 'sources' })}
             advice={advice}
@@ -519,11 +573,7 @@ export function App() {
             setDialog(null);
             void copy(text, '已复制文件内容');
           }}
-          onDownload={(fileName, text) => {
-            setDialog(null);
-            downloadText(fileName, text);
-            notify(`已下载 ${fileName}`);
-          }}
+          onDownload={(fileName, text) => void saveExport(fileName, text)}
         />
       )}
       {dialog?.kind === 'export-rules' && (
@@ -535,11 +585,7 @@ export function App() {
             setDialog(null);
             void copy(text, '已复制文件内容');
           }}
-          onDownload={(fileName, text) => {
-            setDialog(null);
-            downloadText(fileName, text);
-            notify(`已下载 ${fileName}`);
-          }}
+          onDownload={(fileName, text) => void saveExport(fileName, text)}
         />
       )}
       {dialog?.kind === 'import' && <ImportDialog entries={dialog.entries} onClose={closeDialog} onImport={() => void runImport(dialog.entries)} />}
@@ -556,10 +602,9 @@ export function App() {
             onPickFolder: (id) => void pickFolderSource(id),
             onImportFiles: (files) => void importFiles(files),
             onDownloadSkill: () =>
-              void import('./skillPackage').then(({ skillZip }) => {
-                downloadBlob(`${SKILL_NAME}.zip`, new Blob([skillZip() as BlobPart], { type: 'application/zip' }));
-                notify(`已下载 ${SKILL_NAME}.zip，解压后放进 Agent 的技能文件夹`);
-              }),
+              void import('./skillPackage').then(async ({ skillZip }) => {
+                if (await downloadBlob(`${SKILL_NAME}.zip`, new Blob([skillZip() as BlobPart], { type: 'application/zip' }))) notify(`已保存 ${SKILL_NAME}.zip，解压后放进 Agent 的技能文件夹`);
+              }).catch((error: unknown) => notify(String(error))),
             onCopy: (text, message) => void copy(text, message),
           }}
           onBackup={() => void backup()}

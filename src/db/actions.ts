@@ -392,6 +392,5 @@ export async function importEntries(entries: ImportEntry[]): Promise<{ added: nu
 export async function exportBackup(): Promise<{ fileName: string; text: string }> {
   const [items, decisions, versions] = await Promise.all([db.items.toArray(), db.decisions.toArray(), db.versions.toArray()]);
   const backup = makeBackup(items, decisions, versions);
-  await updateSettings({ lastBackupAt: Date.now(), changedSinceBackup: false });
   return backup;
 }

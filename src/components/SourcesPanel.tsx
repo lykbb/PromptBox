@@ -5,6 +5,7 @@
 
 import { useState, type DragEvent } from 'react';
 import { chooseFiles } from '../browser';
+import { isDesktop } from '../desktop';
 import { SKILL_NAME } from '../config';
 import { CHAT_EXPORT_HELP } from '../logic/chatExport';
 import type { FolderSourceId } from '../scan/protocol';
@@ -145,7 +146,7 @@ export function SourcesPanel(props: SourcesPanelProps & { onOpenAgent: () => voi
         </p>
       )}
       <p className="hint">
-        {folderPicker
+        {isDesktop() ? '选择后由应用记住文件夹，只读取你授权的目录。原路径变化或无法读取时，请重新连接。' : folderPicker
           ? `这些文件夹以点开头，选择窗口里默认看不到：先复制路径，${PASTE_HINT[os]}。`
           : '这个浏览器记不住文件夹授权，每次扫描都要重新选择。用 Chrome 或 Edge 可以只选一次。'}
       </p>

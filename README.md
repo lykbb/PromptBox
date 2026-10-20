@@ -2,7 +2,7 @@
 
 从你和 AI 的对话里提炼提示词和规则，再按你自己的风格写新的。
 
-库和扫描记录保存在当前浏览器。浏览器本地扫描不上传聊天记录；用模型生成、问 AI 或让外部 Agent 提炼时，相关内容会发送给你选用的模型。
+库和扫描记录保存在本机：桌面版使用应用自己的存储，网页版使用当前浏览器。本地扫描不上传聊天记录；用模型生成、问 AI 或让外部 Agent 提炼时，相关内容会发送给你选用的模型。
 
 ## 三种方式把提示词收进来
 
@@ -69,7 +69,9 @@ npm run dev
 
 ### 桌面版（macOS）
 
-已打包版本见 [GitHub Releases](https://github.com/lykbb/PromptBox/releases/latest)，下载 `PromptBox-macOS-v0.1.0.zip` 后解压。仓库为私有时，需要有仓库访问权限才能下载。
+v0.2.0 起是独立的 macOS 应用：Swift/AppKit 管理窗口、系统菜单和本机操作，WKWebView 复用现有界面。运行不依赖 Chrome、Python、Node 或 Electron。支持 Apple Silicon、macOS 14 及以上。
+
+已打包版本见 [GitHub Releases](https://github.com/lykbb/PromptBox/releases/latest)，下载 `PromptBox-macOS-0.2.0-arm64.zip` 后解压得到 `PromptBox.app`。
 
 也可以自行打包：
 
@@ -77,9 +79,15 @@ npm run dev
 npm run package:mac
 ```
 
-生成 `release/PromptBox.app`，可以放到桌面或「应用程序」里打开。这个轻量启动器依赖本机的 `/usr/bin/python3`，包内不含 Python 和浏览器运行时；它在本机启动网页服务（只监听 `127.0.0.1:5190`，别的电脑访问不到），检测到 `/Applications/Google Chrome.app` 时使用 Chrome 独立窗口，否则尝试打开默认浏览器。当前包未签名、未做 Apple 公证，macOS 可能限制首次打开。
+生成 `release/PromptBox-Desktop-v0.2.0/PromptBox.app`、ZIP 和校验文件。输出目录存在时默认拒绝覆盖。当前为本机临时签名，未做 Developer ID 签名和 Apple 公证，下载后首次打开可能受 macOS 限制。
 
-桌面版不带示例，数据保存在使用的浏览器里，和开发服务器（5180）的互不影响。关闭窗口后后台服务仍运行，下次打开会复用服务。若 5190 端口已被其他服务占用，启动器可能打开错误页面，应先确认端口占用；不要直接终止不明进程。需要停止时可以重启电脑，或确认占用进程确实为 PromptBox 的服务后再结束该进程。
+桌面版不带示例，数据统一放在项目根目录的 `data/` 中：`library.json` 保存内容、版本、扫描记录和设置，`library.previous.json` 保留上一次写入，`folders.json` 保存文件夹授权路径。WebKit 只保留临时工作数据，不使用浏览器的持久数据库。此目录可能含 Key 和原话证据，已排除 Git 上传；请用「设置 → 数据」导出备份，避免直接修改库文件。单独下载、脱离源码目录的应用会使用应用旁的 `PromptBox Data/` 文件夹。
+
+旧版 Chrome 数据不会自动迁移，模型 Key 也需要重新填写；文件菜单的「打开旧版浏览器数据」可回到原来源导出备份。移动新版应用或项目时，请同时保留对应数据文件夹。
+
+原生进程内的只读资源服务监听 `127.0.0.1:53917`，为界面模块、数据库和扫描线程提供稳定的本地来源；不提供数据或原生调用接口。退出 PromptBox 时服务随进程结束，没有独立的 Python 后台进程。被其他程序占用时会明确报错，避免打开错误服务。
+
+桌面版支持系统文件打开和保存面板、文件夹授权与增量扫描、剪贴板及模型请求。模型请求通过原生网络层发送，不受网页跨域限制。开发入口为 `npm run desktop:run`，原生部分见 [`desktop/README.md`](desktop/README.md)。
 
 ### 记录来源
 

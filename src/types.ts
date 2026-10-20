@@ -183,6 +183,8 @@ export interface SourceRecord {
   id: SourceId;
   /** Chrome、Edge 里记住的文件夹授权。 */
   handle?: FileSystemDirectoryHandle;
+  /** 独立桌面版在原生侧保存的文件夹授权。 */
+  nativeFolder?: boolean;
   /** 显示用：文件夹名或导出文件名。 */
   label: string;
   conversations: number;

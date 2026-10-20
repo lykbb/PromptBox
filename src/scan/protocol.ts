@@ -4,7 +4,15 @@ import type { ScannedFile, SourceId, Utterance } from '../types';
 
 export type ScanJob =
   | { sourceId: FolderSourceId; handle: FileSystemDirectoryHandle }
+  | { sourceId: FolderSourceId; native: true }
+  | ({ sourceId: FolderSourceId } & NativeScanFiles)
   | { sourceId: SourceId; files: File[] };
+
+export interface NativeScanFiles {
+  records: { path: string; content: string; size: number; modified: number }[];
+  matched: number;
+  compressed: number;
+}
 
 /** 选文件夹的来源；网页版导出是选文件。 */
 export type FolderSourceId = 'codex' | 'claude-code' | 'workbuddy';

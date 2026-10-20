@@ -2,6 +2,7 @@
 
 import { useState, type KeyboardEvent, type ReactNode } from 'react';
 import { version } from '../../package.json';
+import { isDesktop } from '../desktop';
 import { REPO_URL } from '../config';
 import { updateSettings } from '../db/db';
 import { formatAgo } from '../logic/time';
@@ -34,7 +35,7 @@ const TABS: { id: SettingsTab; label: string; icon: ReactNode; desc?: string }[]
     id: 'sources',
     label: '记录来源',
     icon: <FolderIcon />,
-    desc: 'PromptBox 从你和 AI 的对话里找出反复用到的提示词和规则。只在这个浏览器里读取和计算，不上传。',
+    desc: 'PromptBox 从你和 AI 的对话里找出反复用到的提示词和规则。本地扫描不上传记录。',
   },
   { id: 'model', label: 'AI 模型', icon: <SparkIcon />, desc: '用于「按我的风格生成」和「AI 提炼」。不填也能用，生成时可以复制指令到你常用的 AI。' },
   {
@@ -44,7 +45,7 @@ const TABS: { id: SettingsTab; label: string; icon: ReactNode; desc?: string }[]
     desc: '让 Codex、Claude Code、WorkBuddy 这类 Agent 读懂意思再提炼，比网页里按字面找更准，还能读更多工具的记录。',
   },
   { id: 'appearance', label: '外观', icon: <ThemeIcon /> },
-  { id: 'data', label: '数据', icon: <DataIcon />, desc: '内容只存在这个浏览器里。换浏览器或清除浏览器数据前，先导出备份；恢复时把备份文件拖进「记录来源」。' },
+  { id: 'data', label: '数据', icon: <DataIcon />, desc: isDesktop() ? '内容、版本和设置统一保存在项目 data 文件夹。单独下载的应用使用旁边的 PromptBox Data 文件夹。旧版浏览器数据不会自动迁移。' : '内容只存在这个浏览器里。换浏览器或清除浏览器数据前，先导出备份；恢复时把备份文件拖进「记录来源」。' },
   { id: 'about', label: '关于', icon: <InfoIcon /> },
 ];
 
@@ -191,8 +192,8 @@ function AboutPanel() {
       </p>
       <p>从你和 AI 的对话里提炼提示词和规则，再按你的风格写新的。</p>
       <ul className="about-list">
-        <li>没有账号和服务器，内容只存在这个浏览器里。</li>
-        <li>聊天记录在浏览器里扫描，不上传。</li>
+        <li>{isDesktop() ? '独立 macOS 应用窗口，内容保存在应用自己的本地存储中。' : '没有账号和云端存储，内容保存在当前浏览器中。'}</li>
+        <li>聊天记录在本地扫描，不上传。</li>
         <li>只有用到模型时，才把需要的内容直接发给你选的服务商。</li>
       </ul>
       <p className="hint">
