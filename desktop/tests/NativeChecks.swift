@@ -5,9 +5,10 @@ import Network
 struct NativeChecks {
     static func main() async throws {
         let fm = FileManager.default
-        let root = fm.temporaryDirectory.appendingPathComponent("promptbox-native-checks-\(UUID().uuidString)")
+        let root = URL(fileURLWithPath: fm.currentDirectoryPath)
+            .appendingPathComponent("release/.native-checks-\(UUID().uuidString)")
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { try? fm.trashItem(at: root, resultingItemURL: nil) }
         let site = root.appendingPathComponent("site")
         try fm.createDirectory(at: site, withIntermediateDirectories: true)
         try Data("<h1>synthetic-test</h1>".utf8).write(to: site.appendingPathComponent("index.html"))
@@ -49,6 +50,24 @@ struct NativeChecks {
         let original = try Data(contentsOf: record)
         precondition(Data(base64Encoded: imported[0]["base64"] as! String) == original)
         let store = try DesktopStore(root: root.appendingPathComponent("data"))
+        let documents = root.appendingPathComponent("Documents")
+        let installed = DesktopStore.defaultRoot(bundle: URL(fileURLWithPath: "/Applications/PromptBox.app"), documents: documents)
+        precondition(installed == documents.appendingPathComponent("PromptBox", isDirectory: true))
+        let diskImage = DesktopStore.defaultRoot(bundle: URL(fileURLWithPath: "/Volumes/PromptBox 0.2.1/PromptBox.app"), documents: documents)
+        precondition(diskImage == installed)
+        let translocated = DesktopStore.defaultRoot(bundle: URL(fileURLWithPath: "/private/var/folders/test/AppTranslocation/random/d/PromptBox.app"), documents: documents)
+        precondition(translocated == installed)
+        precondition(!fm.fileExists(atPath: documents.path))
+        let repository = root.appendingPathComponent("repository")
+        try fm.createDirectory(at: repository, withIntermediateDirectories: true)
+        try Data("{\"name\":\"promptbox\"}".utf8).write(to: repository.appendingPathComponent("package.json"))
+        let project = DesktopStore.defaultRoot(bundle: repository.appendingPathComponent("release/build/PromptBox.app"), documents: documents)
+        precondition(project == repository.appendingPathComponent("data", isDirectory: true))
+        let portableBase = root.appendingPathComponent("outside-source/a/b/c/d/e/f")
+        let portable = portableBase.appendingPathComponent("PromptBox Data", isDirectory: true)
+        try fm.createDirectory(at: portable, withIntermediateDirectories: true)
+        try Data("existing-library".utf8).write(to: portable.appendingPathComponent("library.json"))
+        precondition(DesktopStore.defaultRoot(bundle: portableBase.appendingPathComponent("PromptBox.app"), documents: documents).path == portable.path)
         let emptyStore = try store.load()
         precondition(emptyStore == nil)
         let snapshot = "{\"app\":\"promptbox\",\"formatVersion\":1,\"tables\":{\"items\":[]}}"
@@ -61,6 +80,6 @@ struct NativeChecks {
         do { try store.save("{}"); preconditionFailure("Invalid state was accepted") } catch {}
         let preserved = try store.load()
         precondition(preserved == snapshot)
-        print("Native checks passed: assets, CSP, file isolation, bridge origin, folder filtering, symlinks, incremental scan, binary import, data folder persistence, corrupt write prevention")
+        print("Native checks passed: assets, CSP, file isolation, bridge origin, folder filtering, symlinks, incremental scan, binary import, data persistence, corrupt write prevention, installed/DMG/translocated/project/portable data locations")
     }
 }

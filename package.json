@@ -1,7 +1,7 @@
 {
   "name": "promptbox",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "从你和 AI 的对话里提炼提示词和规则，再按你的风格写新的。",
   "license": "MIT",
   "type": "module",

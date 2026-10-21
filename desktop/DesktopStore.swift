@@ -7,7 +7,7 @@ final class DesktopStore {
     private let previous: URL
     private let permissions: URL
 
-    static func defaultRoot(bundle: URL) -> URL {
+    static func defaultRoot(bundle: URL, documents: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]) -> URL {
         var parent = bundle.deletingLastPathComponent()
         for _ in 0..<6 {
             let manifest = parent.appendingPathComponent("package.json")
@@ -19,7 +19,14 @@ final class DesktopStore {
             if next == parent { break }
             parent = next
         }
-        return bundle.deletingLastPathComponent().appendingPathComponent("PromptBox Data", isDirectory: true)
+        // Keep existing portable libraries in place, but never create data beside an
+        // installed or translocated app: its parent can be a read-only disk image.
+        let portable = bundle.deletingLastPathComponent().appendingPathComponent("PromptBox Data", isDirectory: true)
+        if FileManager.default.fileExists(atPath: portable.appendingPathComponent("library.json").path),
+           FileManager.default.isWritableFile(atPath: portable.path) {
+            return portable
+        }
+        return documents.appendingPathComponent("PromptBox", isDirectory: true)
     }
 
     init(root: URL) throws {
@@ -27,7 +34,14 @@ final class DesktopStore {
         file = root.appendingPathComponent("library.json")
         previous = root.appendingPathComponent("library.previous.json")
         permissions = root.appendingPathComponent("folders.json")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            guard FileManager.default.isWritableFile(atPath: root.path) else {
+                throw BridgeError.message("数据文件夹不可写：\(root.path)")
+            }
+        } catch {
+            throw BridgeError.message("无法打开数据文件夹：\(root.path)。请确认已允许 PromptBox 访问该文件夹。\n\(error.localizedDescription)")
+        }
     }
 
     func load() throws -> String? {

@@ -16,7 +16,8 @@ final class PromptBoxApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         do {
             guard let root = Bundle.main.resourceURL?.appendingPathComponent("site") else { throw BridgeError.message("缺少应用资源，请重新打包") }
             let dataRoot = DesktopStore.defaultRoot(bundle: Bundle.main.bundleURL)
-            store = try DesktopStore(root: smoke ? dataRoot.appendingPathComponent(".test") : dataRoot)
+            let testRoot = ProcessInfo.processInfo.environment["PROMPTBOX_TEST_DATA_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            store = try DesktopStore(root: smoke ? (testRoot ?? dataRoot.appendingPathComponent(".test")) : dataRoot)
             assets = try LocalAssets(root: root, port: smoke ? 53918 : 53917)
             buildMenu()
             assets.start { [self] error in

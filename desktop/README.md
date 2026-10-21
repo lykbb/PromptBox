@@ -2,12 +2,14 @@
 
 Swift/AppKit 管理独立窗口、菜单、文件打开和保存、剪贴板、文件夹读取和模型请求；WKWebView 复用 React 界面。运行时只用 macOS 系统框架，不依赖 Chrome、Python、Node 或 Electron。
 
-`npm run package:mac` 生成 `release/PromptBox-Desktop-v版本/PromptBox.app` 和 ZIP；输出目录存在时拒绝覆盖。`npm run desktop:run` 用时间戳目录构建并启动，接受 `-- --verify`、`-- --debug`、`-- --logs`。
+`npm run package:mac` 生成 `release/PromptBox-Desktop-v版本/PromptBox.app` 和 `release/PromptBox-macOS-版本-arm64.dmg`。DMG 内包含应用和 Applications 快捷方式，拖入即可安装；已有产物不覆盖。`npm run desktop:run` 用时间戳目录构建并启动，接受 `-- --verify`、`-- --debug`、`-- --logs`。校验结果只在终端显示，不生成过程记录。
+
+Swift 编译缓存统一放在项目内 `release/.build-cache/swift/`，自检临时文件也放在项目内 `release/` 并在完成后清理，不写到项目外的临时目录。
 
 原生程序内的只读资源服务监听 `127.0.0.1:53917`，用于兼容 WebKit 的模块和扫描 Worker；不承载用户数据或原生操作。退出应用时服务随进程结束。`--test-profile` 使用 53918 端口及 `data/.test/`，不接触正式库。
 
-数据由 `DesktopStore` 写入项目根目录 `data/library.json`，原生侧自动保留上一版 `library.previous.json`；文件夹授权另存 `folders.json`。WebKit 使用非持久存储，只承载当前会话的 Dexie 工作副本；React 挂载前从磁盘恢复，写事务完成后按顺序存盘，退出前强制刷新。加载失败时不挂载界面、不覆盖已有文件。独立下载的应用在自身旁边建立 `PromptBox Data/`。数据目录应一并备份，不能随应用 ZIP 上传。
+数据由 `DesktopStore` 写入项目根目录 `data/library.json`；脱离源码目录安装的应用使用用户的 `~/Documents/PromptBox/`，不向 Applications、DMG 或系统随机隔离目录写数据。已有可写的应用旁 `PromptBox Data/library.json` 继续原地使用，不迁移或导入。原生侧自动保留上一版 `library.previous.json`，文件夹授权另存 `folders.json`。WebKit 使用非持久存储，只承载当前会话的 Dexie 工作副本；React 挂载前从磁盘恢复，写事务完成后按顺序存盘，退出前强制刷新。加载失败时不挂载界面、不覆盖已有文件。数据目录应一并备份，不能随安装包上传。`--test-profile` 可通过 `PROMPTBOX_TEST_DATA_DIR` 指定隔离的测试数据目录，正式启动忽略该变量。
 
 旧版可从文件菜单打开原来的 `localhost:5190` 页面导出备份，再导入新版，Key 需要重新设置。
 
-本机操作只接受应用主页面发来的调用。记录目录只能经用户选择后读取，遍历不跟随软链接；模型请求不携带浏览器 Cookie，不将鉴权头跟随跳转到不同来源。编译目标为 Apple Silicon、macOS 14 及以上。签名为本机临时签名，不等同于 Developer ID 签名或 Apple 公证。
+本机操作只接受应用主页面发来的调用。记录目录只能经用户选择后读取，遍历不跟随软链接；模型请求不携带浏览器 Cookie，不将鉴权头跟随跳转到不同来源。编译目标为 Apple Silicon、macOS 14 及以上。默认使用本机临时签名，不等同于 Developer ID 签名或 Apple 公证；DMG 不会绕过 Gatekeeper。已有 Developer ID 证书时可设置 `PROMPTBOX_SIGN_IDENTITY` 正式签名，公证仍需单独完成。可信来源的未公证应用，首次受阻时按 Apple 官方说明在「系统设置 → 隐私与安全性 → 仍要打开」单独允许，不关闭全局安全检查。

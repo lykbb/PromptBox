@@ -71,7 +71,7 @@ npm run dev
 
 v0.2.0 起是独立的 macOS 应用：Swift/AppKit 管理窗口、系统菜单和本机操作，WKWebView 复用现有界面。运行不依赖 Chrome、Python、Node 或 Electron。支持 Apple Silicon、macOS 14 及以上。
 
-已打包版本见 [GitHub Releases](https://github.com/lykbb/PromptBox/releases/latest)，下载 `PromptBox-macOS-0.2.0-arm64.zip` 后解压得到 `PromptBox.app`。
+已打包版本见 [GitHub Releases](https://github.com/lykbb/PromptBox/releases/latest)，下载 `PromptBox-macOS-0.2.1-arm64.dmg`，打开后将 `PromptBox.app` 拖进 Applications，再从「应用程序」打开。
 
 也可以自行打包：
 
@@ -79,9 +79,9 @@ v0.2.0 起是独立的 macOS 应用：Swift/AppKit 管理窗口、系统菜单�
 npm run package:mac
 ```
 
-生成 `release/PromptBox-Desktop-v0.2.0/PromptBox.app`、ZIP 和校验文件。输出目录存在时默认拒绝覆盖。当前为本机临时签名，未做 Developer ID 签名和 Apple 公证，下载后首次打开可能受 macOS 限制。
+生成 `release/PromptBox-Desktop-v0.2.1/PromptBox.app` 和 `release/PromptBox-macOS-0.2.1-arm64.dmg`，不生成额外过程记录或校验文件。已有产物默认拒绝覆盖。当前为本机临时签名，未做 Developer ID 签名和 Apple 公证，DMG 格式不会免除 macOS 安全检查。确认从可信来源下载后，首次受阻可按 [Apple 官方说明](https://support.apple.com/102445)在「系统设置 → 隐私与安全性 → 仍要打开」单独允许；不需要关闭系统安全检查。
 
-桌面版不带示例，数据统一放在项目根目录的 `data/` 中：`library.json` 保存内容、版本、扫描记录和设置，`library.previous.json` 保留上一次写入，`folders.json` 保存文件夹授权路径。WebKit 只保留临时工作数据，不使用浏览器的持久数据库。此目录可能含 Key 和原话证据，已排除 Git 上传；请用「设置 → 数据」导出备份，避免直接修改库文件。单独下载、脱离源码目录的应用会使用应用旁的 `PromptBox Data/` 文件夹。
+桌面版不带示例。从源码项目运行时，数据统一放在项目根目录的 `data/` 中：`library.json` 保存内容、版本、扫描记录和设置，`library.previous.json` 保留上一次写入，`folders.json` 保存文件夹授权路径。WebKit 只保留临时工作数据，不使用浏览器的持久数据库。此目录可能含 Key 和原话证据，已排除 Git 上传；请用「设置 → 数据」导出备份，避免直接修改库文件。单独下载安装的应用会使用用户「文稿」里的 `PromptBox/` 文件夹，避免向只读的 DMG、Applications 或系统隔离目录写数据；如果旧版应用旁已有可写的 `PromptBox Data/library.json`，继续原地使用，不自动迁移或导入。
 
 旧版 Chrome 数据不会自动迁移，模型 Key 也需要重新填写；文件菜单的「打开旧版浏览器数据」可回到原来源导出备份。移动新版应用或项目时，请同时保留对应数据文件夹。
 
